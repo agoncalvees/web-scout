@@ -3,7 +3,7 @@ name: prospector-lead-scoring
 description: Define e aplica o critério de qualificação de leads (Quente/Morno/Frio) do Prospector. Use ao implementar ou revisar scoring, filtros, priorização, funil comercial e novas fontes de dados.
 ---
 
-# Critério de Qualificação de Leads — Score v3
+# Critério de Qualificação de Leads — Score v4
 
 ## Contexto
 
@@ -11,7 +11,7 @@ O Prospector é um app pessoal que encontra empresas locais para oferta de sites
 feitos com IA. O score ordena oportunidades observáveis; ele não afirma que uma
 empresa certamente comprará.
 
-**Versão vigente no código:** `v3-hibrido-google-2026-07`.
+**Versão vigente no código:** `v4-hibrido-web-2026-07`.
 
 Os pesos são uma estimativa inicial. Devem ser recalibrados depois de 30–50
 contatos reais, comparando sinais dos leads que fecharam com os que recusaram.
@@ -31,11 +31,17 @@ O filtro usa o resultado do enrichment, não apenas a presença bruta de
 `website`. Isso preserva redes sociais colocadas no campo de site e sites
 declarados que estão fora do ar.
 
-A descoberta permanece no OpenStreetMap. O Google Places é um verificador
-opcional e só roda depois de website declarado, domínio do e-mail e candidatos
-de domínio falharem. O match exige compatibilidade de nome e distância, ou
-telefone coincidente. Dados do Places não são copiados para o lead; persiste-se
-somente o `place_id` permitido e o resultado da checagem HTTP independente.
+A descoberta permanece no OpenStreetMap. A Tavily é o verificador web principal
+e só roda depois de website declarado, domínio do e-mail e candidatos de domínio
+falharem. Redes sociais e diretórios são descartados; um site candidato só é
+aceito quando a página responde e combina nome/domínio/cidade ou telefone. Se
+nenhum candidato oficial aparece, o lead recebe `sem_site_alta_confianca`, mas a
+interface o apresenta como “Sem site provável” para não prometer certeza.
+
+O Google Places continua como alternativa opcional. O match exige
+compatibilidade de nome e distância, ou telefone coincidente. Dados brutos da
+Tavily e do Places não são copiados para o lead; persiste-se apenas timestamps,
+o `place_id` permitido e o resultado da checagem HTTP independente.
 
 ## 2. Pontuação normalizada — máximo 100
 

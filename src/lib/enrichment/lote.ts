@@ -35,7 +35,7 @@ export interface LoteResultado {
   cnpjResolvidos: number;
 }
 
-/** Requer chamadas externas de site; muda quando a integração Google é ativada. */
+/** Requer chamadas externas de site; muda quando um verificador web é ativado. */
 function pendenteEnrichment() {
   const versao = versaoVerificacaoSiteAtual();
   return {
@@ -70,6 +70,7 @@ interface ResultadoLead {
   siteConfidence: number;
   googlePlaceId?: string | null;
   googleCheckedAt?: Date | null;
+  tavilyCheckedAt?: Date | null;
   cnpj: string | null;
   /** `sem_cnpj` se não achamos CNPJ; `null` se achamos mas a Receita não informa o porte. */
   porte: Porte | null;
@@ -334,6 +335,9 @@ export async function processarLote(searchId: string): Promise<LoteResultado> {
           : {}),
         ...(r.googleCheckedAt !== undefined
           ? { googleCheckedAt: r.googleCheckedAt }
+          : {}),
+        ...(r.tavilyCheckedAt !== undefined
+          ? { tavilyCheckedAt: r.tavilyCheckedAt }
           : {}),
         cnpj: r.cnpj,
         porte: r.porte,

@@ -12,6 +12,7 @@ import { prisma } from "@/lib/db";
 import { categoriaPorValorOsm, labelCategoria } from "@/lib/categorias";
 import { obterResumoGooglePlaces } from "@/lib/enrichment/google-places";
 import { contarPendentes } from "@/lib/enrichment/lote";
+import { obterResumoTavily } from "@/lib/enrichment/tavily";
 import { SITE_STATUS_CLASSE, SITE_STATUS_LABEL } from "@/lib/labels";
 import { PORTE_LABEL, TIER_LABEL } from "@/lib/pricing";
 import {
@@ -35,7 +36,7 @@ export default async function BuscaPage({
 }) {
   const { id } = await params;
   const { mostrar } = await searchParams;
-  const [busca, googlePlaces] = await Promise.all([
+  const [busca, tavily, googlePlaces] = await Promise.all([
     prisma.search.findUnique({
       where: { id },
       include: {
@@ -44,11 +45,17 @@ export default async function BuscaPage({
         },
       },
     }),
+    obterResumoTavily(),
     obterResumoGooglePlaces(),
   ]);
 
   if (!busca) notFound();
 
+  const verificador = tavily.configurado
+    ? { ...tavily, nome: "Tavily" }
+    : googlePlaces.configurado
+      ? { ...googlePlaces, nome: "Google" }
+      : null;
   const pendentes = await contarPendentes(busca.id);
   const leads = [...busca.leads].sort(
     (a, b) =>
@@ -97,7 +104,7 @@ export default async function BuscaPage({
           <p className="text-2xl font-semibold text-emerald-700">
             {melhores.length}
           </p>
-          <p className="text-sm text-neutral-500">oportunidades confirmadas</p>
+          <p className="text-sm text-neutral-500">oportunidades priorizadas</p>
         </div>
         <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
           <p className="text-2xl font-semibold">{comContato}</p>
@@ -105,14 +112,14 @@ export default async function BuscaPage({
         </div>
         <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
           <p className="text-2xl font-semibold">
-            {googlePlaces.configurado
-              ? `${googlePlaces.usados}/${googlePlaces.limite}`
+            {verificador
+              ? `${verificador.usados}/${verificador.limite}`
               : "Inativo"}
           </p>
           <p className="text-sm text-neutral-500">
-            {googlePlaces.configurado
-              ? "verificações Google neste mês"
-              : "Google Places não configurado"}
+            {verificador
+              ? `verificações ${verificador.nome} neste mês`
+              : "Verificador web não configurado"}
           </p>
         </div>
       </div>

@@ -1,7 +1,7 @@
 import { SiteStatus } from "@/generated/prisma/enums";
 
 export const SITE_STATUS_LABEL: Record<SiteStatus, string> = {
-  [SiteStatus.sem_site_alta_confianca]: "Sem site",
+  [SiteStatus.sem_site_alta_confianca]: "Sem site provável",
   [SiteStatus.site_fora_do_ar]: "Site fora do ar",
   [SiteStatus.tem_site_ativo]: "Tem site ativo",
   [SiteStatus.checar_manualmente]: "Checar manualmente",

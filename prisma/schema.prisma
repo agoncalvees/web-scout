@@ -103,6 +103,8 @@ model Enrichment {
   googlePlaceId   String?
   /// Momento em que o Places confirmou o estabelecimento.
   googleCheckedAt DateTime?
+  /// Momento da busca web que procurou o site oficial na Tavily.
+  tavilyCheckedAt DateTime?
 
   cnpj           String?
   porte          Porte?
@@ -128,7 +130,7 @@ model Enrichment {
   @@index([siteCheckedAt])
 }
 
-/// Contador interno para manter integrações pagas abaixo da franquia configurada.
+/// Contador interno para manter integrações abaixo da franquia configurada.
 model ExternalApiUsage {
   provider  String
   period    String

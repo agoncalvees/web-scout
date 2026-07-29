@@ -3,7 +3,7 @@ import { isCategoriaKey, type CategoriaKey } from "@/lib/categorias";
 
 export type Prioridade = "quente" | "morno" | "frio";
 
-export const SCORE_VERSION = "v3-hibrido-google-2026-07";
+export const SCORE_VERSION = "v4-hibrido-web-2026-07";
 
 export interface SinaisOportunidade {
   siteStatus: SiteStatus;

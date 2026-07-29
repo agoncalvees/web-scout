@@ -53,7 +53,9 @@ npm run db:push           # o Postgres emulado não suporta `migrate`, use push
 | `APP_PASSWORD` | Senha única de acesso. |
 | `AUTH_SECRET` | Segredo que assina o cookie de sessão. |
 | `OSM_USER_AGENT` | Identificação enviada ao Nominatim/Overpass. A política do OSM exige um UA com forma de contato. |
-| `GOOGLE_PLACES_API_KEY` | Opcional. Confirma empresas no Places API (New); fica somente no servidor. |
+| `TAVILY_API_KEY` | Recomendado. Procura o site oficial na web; o plano gratuito oferece 1.000 créditos/mês sem cartão. |
+| `TAVILY_MONTHLY_LIMIT` | Teto interno de buscas Tavily. Máximo aceito pelo app: 900/mês. |
+| `GOOGLE_PLACES_API_KEY` | Alternativa opcional. Confirma empresas no Places API (New); fica somente no servidor. |
 | `GOOGLE_PLACES_MONTHLY_LIMIT` | Teto interno de Place Details. Máximo aceito pelo app: 900/mês. |
 
 ## Como o pipeline funciona
@@ -88,14 +90,16 @@ Para cada lead:
 - **tem e-mail corporativo** → testa o domínio do e-mail antes de consumir API
 - **sem `website`, ou só rede social** (Instagram, Facebook, Linktree…) → chuta
   domínios a partir do nome (`.com.br`, `.com`) e checa cada um
-- **ainda incerto e Google configurado** → usa Text Search somente por ID, busca
+- **ainda incerto e Tavily configurada** → busca até cinco resultados, elimina
+  redes sociais e diretórios e valida a identidade diretamente no site candidato
+- **Google configurado como alternativa** → usa Text Search somente por ID, busca
   um Place Details e valida nome/distância/telefone antes de confiar no resultado
 
 Resultado em `siteStatus`:
 
 | Status | Significado |
 |---|---|
-| `sem_site_alta_confianca` | **O lead que interessa.** O Places encontrou a empresa e não informou site próprio. |
+| `sem_site_alta_confianca` | **O lead que interessa.** A busca web não encontrou um domínio oficial plausível. A interface mostra “Sem site provável” porque ausência em busca não é prova absoluta. |
 | `site_fora_do_ar` | Tem domínio, mas não responde. Bom gancho de venda. |
 | `tem_site_ativo` | Já tem site. Descartar. |
 | `checar_manualmente` | A verificação não foi conclusiva; score limitado a 39. |
@@ -105,10 +109,12 @@ de palavra única cai em `checar_manualmente` em vez de `tem_site_ativo`. O moti
 um acerto encerra a busca e tira o lead da lista, então um falso positivo custa
 um lead bom — "Pesqueiro" acha `pesqueiro.com.br`, que é de outra empresa.
 
-O app não persiste nome, endereço, telefone ou avaliações retornados pelo
-Google. O conteúdo é usado transitoriamente para o match; somente o `place_id`
-(permitido pela política do Places) e o resultado da checagem HTTP do site são
-mantidos. Um contador no Postgres limita Place Details a no máximo 900 por mês.
+O app não persiste resultados brutos da Tavily nem nome, endereço, telefone ou
+avaliações retornados pelo Google. Esses conteúdos são usados transitoriamente
+para localizar e conferir o candidato; a URL só é salva depois de uma checagem
+HTTP independente. No Google, apenas o `place_id` permitido e o resultado do
+checker são mantidos. Contadores no Postgres limitam cada integração a no máximo
+900 chamadas por mês.
 
 ### 3. Match de CNPJ (`src/lib/enrichment/cnpj.ts`)
 
@@ -208,6 +214,7 @@ arquivos `.env` reais continuam ignorados pelo Git.
 | Overpass | fair-use por IP, instável | [`overpass.ts`](src/lib/sources/overpass.ts) usa `timeout:25` e cai para o mirror `overpass.kumi.systems` |
 | IBGE Localidades | catálogo público de municípios | rota interna valida a UF, aplica timeout e cacheia a resposta por 24h |
 | BrasilAPI / minhaReceita | rate limit não documentado | [`cnpj.ts`](src/lib/enrichment/cnpj.ts) serializa as chamadas e cacheia em `CnpjCache` antes de reconsultar |
+| Tavily Search | 1.000 créditos/mês no plano gratuito | busca básica + teto interno de 900/mês; resultados brutos não são persistidos |
 | Google Places (opcional) | 1.000 eventos Enterprise gratuitos/mês na tabela atual | Text Search só por ID + teto interno de 900 Place Details/mês; chave restrita e server-side |
 | Vercel Hobby | 300s por função | lotes com orçamento de tempo, sem Cron |
 | Neon (serverless) | limite de conexões da conta | pool de 5 por instância em [`db.ts`](src/lib/db.ts); use a connection string do pooler |

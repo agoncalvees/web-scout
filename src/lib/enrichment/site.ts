@@ -4,11 +4,19 @@ import {
   googlePlacesConfigurado,
   verificarNoGooglePlaces,
 } from "./google-places";
+import {
+  buscarSitesNoTavily,
+  normalizarTexto,
+  tavilyConfigurado,
+  tokensRelevantes,
+} from "./tavily";
 
 const SITE_CHECK_VERSION_LOCAL = "v3-local-2026-07";
 const SITE_CHECK_VERSION_GOOGLE = "v3-google-places-2026-07";
+const SITE_CHECK_VERSION_TAVILY = "v4-tavily-2026-07";
 
 export function versaoVerificacaoSiteAtual(): string {
+  if (tavilyConfigurado()) return SITE_CHECK_VERSION_TAVILY;
   return googlePlacesConfigurado()
     ? SITE_CHECK_VERSION_GOOGLE
     : SITE_CHECK_VERSION_LOCAL;
@@ -60,6 +68,57 @@ function normalizarUrl(url: string): string | null {
   const host = extrairHost(url);
   if (!host) return null;
   return /^https?:\/\//i.test(url) ? url : `https://${url}`;
+}
+
+/** Evita protocolos estranhos, credenciais embutidas e IPs locais/privados. */
+export function ehUrlHttpPublica(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (
+      !["http:", "https:"].includes(parsed.protocol) ||
+      parsed.username ||
+      parsed.password
+    ) {
+      return false;
+    }
+
+    const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    if (
+      host === "localhost" ||
+      host.endsWith(".localhost") ||
+      host.endsWith(".local") ||
+      host === "::1" ||
+      host === "0:0:0:0:0:0:0:1" ||
+      host.startsWith("fc") ||
+      host.startsWith("fd") ||
+      host.startsWith("fe8") ||
+      host.startsWith("fe9") ||
+      host.startsWith("fea") ||
+      host.startsWith("feb")
+    ) {
+      return false;
+    }
+
+    const partes = host.split(".");
+    if (partes.length === 4 && partes.every((parte) => /^\d+$/.test(parte))) {
+      const [a, b] = partes.map(Number);
+      if (
+        a === 0 ||
+        a === 10 ||
+        a === 127 ||
+        (a === 169 && b === 254) ||
+        (a === 172 && b >= 16 && b <= 31) ||
+        (a === 192 && b === 168) ||
+        a >= 224
+      ) {
+        return false;
+      }
+    }
+
+    return Boolean(host);
+  } catch {
+    return false;
+  }
 }
 
 const EMAILS_GRATUITOS = new Set([
@@ -194,6 +253,8 @@ export interface ResultadoChecagem {
  * servidores de site pequeno respondem 405 a HEAD.
  */
 export async function checarUrl(url: string): Promise<ResultadoChecagem> {
+  if (!ehUrlHttpPublica(url)) return { vivo: false, urlFinal: url };
+
   for (const method of ["HEAD", "GET"] as const) {
     try {
       const res = await fetchWithTimeout(url, {
@@ -203,7 +264,11 @@ export async function checarUrl(url: string): Promise<ResultadoChecagem> {
       });
 
       if (res.status === 405 || res.status === 501) continue; // método não suportado
-      return { vivo: res.status < 400, urlFinal: res.url || url };
+      const urlFinal = res.url || url;
+      return {
+        vivo: res.status < 400 && ehUrlHttpPublica(urlFinal),
+        urlFinal,
+      };
     } catch {
       // DNS inexistente, TLS inválido, timeout: tenta o próximo método.
     }
@@ -228,6 +293,99 @@ export interface EnrichmentSite {
   siteConfidence: number;
   googlePlaceId?: string | null;
   googleCheckedAt?: Date | null;
+  tavilyCheckedAt?: Date | null;
+}
+
+function coberturaDeTokens(esperados: string[], texto: string): number {
+  if (esperados.length === 0) return 0;
+  const recebidos = new Set(tokensRelevantes(texto));
+  return esperados.filter((token) => recebidos.has(token)).length / esperados.length;
+}
+
+function telefoneNaPagina(telefone: string | null, html: string): boolean {
+  const ultimosOito = telefone?.replace(/\D/g, "").slice(-8) ?? "";
+  return (
+    ultimosOito.length === 8 &&
+    html.replace(/\D/g, "").includes(ultimosOito)
+  );
+}
+
+/**
+ * Confere se uma página candidata pertence ao estabelecimento. Um resultado de
+ * busca sozinho nunca é suficiente: diretórios e matérias podem citar o nome.
+ */
+export function siteCorrespondeAoLead(
+  lead: LeadParaEnriquecer,
+  url: string,
+  html: string,
+): boolean {
+  if (telefoneNaPagina(lead.phone, html)) return true;
+
+  const nomeNormalizado = normalizarTexto(lead.name);
+  const paginaNormalizada = normalizarTexto(html.slice(0, 250_000));
+  const cidadeNormalizada = normalizarTexto(lead.cidade);
+  const nomeTokens = tokensRelevantes(lead.name);
+  const temNomeExato =
+    nomeNormalizado.length >= 5 && paginaNormalizada.includes(nomeNormalizado);
+  const coberturaPagina = coberturaDeTokens(nomeTokens, paginaNormalizada);
+  const temCidade =
+    cidadeNormalizada.length >= 3 &&
+    paginaNormalizada.includes(cidadeNormalizada);
+
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./, "").replace(/[.-]/g, " ");
+    const coberturaHost = coberturaDeTokens(nomeTokens, host);
+    const paginaRaiz = parsed.pathname.replace(/\/+$/, "") === "";
+
+    if (nomeTokens.length === 1) {
+      return coberturaHost === 1 && temCidade && coberturaPagina === 1;
+    }
+
+    return (
+      (coberturaHost >= 0.5 &&
+        coberturaPagina >= 0.6 &&
+        (temCidade || coberturaHost >= 0.75)) ||
+      (paginaRaiz && temNomeExato && temCidade)
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function checarSiteDoLead(
+  url: string,
+  lead: LeadParaEnriquecer,
+): Promise<ResultadoChecagem & { confirmado: boolean }> {
+  if (!ehUrlHttpPublica(url)) {
+    return { vivo: false, urlFinal: url, confirmado: false };
+  }
+
+  try {
+    const res = await fetchWithTimeout(url, {
+      method: "GET",
+      timeoutMs: CHECK_TIMEOUT_MS,
+      redirect: "follow",
+      headers: {
+        Accept: "text/html,application/xhtml+xml",
+      },
+    });
+    const urlFinal = res.url || url;
+    const vivo = res.status < 400 && ehUrlHttpPublica(urlFinal);
+    const contentType = res.headers.get("content-type")?.toLowerCase() ?? "";
+    if (!vivo || (!contentType.includes("text/html") && contentType !== "")) {
+      return { vivo, urlFinal, confirmado: false };
+    }
+
+    const html = (await res.text()).slice(0, 250_000);
+    return {
+      vivo,
+      urlFinal,
+      confirmado: siteCorrespondeAoLead(lead, urlFinal, html),
+    };
+  } catch {
+    return { vivo: false, urlFinal: url, confirmado: false };
+  }
 }
 
 /**
@@ -235,9 +393,9 @@ export interface EnrichmentSite {
  *
  * - website do OSM, não-social, vivo        → tem_site_ativo (confiança alta)
  * - website do OSM, não-social, morto       → site_fora_do_ar
- * - só rede social e nenhum domínio adivinhado responde → sem_site_alta_confianca
+ * - Tavily não encontra domínio oficial plausível → sem_site_alta_confianca
  * - domínio adivinhado responde             → tem_site_ativo (confiança média)
- * - sem website e nenhum candidato plausível → checar_manualmente
+ * - busca inconclusiva ou indisponível       → checar_manualmente
  */
 export async function enriquecerSite(lead: LeadParaEnriquecer): Promise<EnrichmentSite> {
   const bruto = lead.websiteRaw?.trim();
@@ -271,10 +429,11 @@ export async function enriquecerSite(lead: LeadParaEnriquecer): Promise<Enrichme
   const candidatos = candidatosDeDominio(lead.name);
 
   for (const candidato of candidatos) {
-    const { vivo, urlFinal } = await checarUrl(candidato.url);
-    if (vivo) {
-      // O domínio existe, mas pode ser homônimo de outra cidade/ramo — daí a
-      // confiança parcial e nunca o status de "sem site".
+    const { vivo, urlFinal, confirmado } = await checarSiteDoLead(
+      candidato.url,
+      lead,
+    );
+    if (vivo && confirmado) {
       return {
         siteStatus: candidato.conclusivo
           ? SiteStatus.tem_site_ativo
@@ -282,6 +441,23 @@ export async function enriquecerSite(lead: LeadParaEnriquecer): Promise<Enrichme
         siteUrl: urlFinal,
         siteConfidence: candidato.confianca,
       };
+    }
+  }
+
+  // A busca web gratuita encontra domínios que não seguem o nome óbvio da
+  // empresa. O resultado só vale depois de baixarmos e validarmos a página.
+  const tavily = await buscarSitesNoTavily(lead);
+  if (tavily.status === "candidatos") {
+    for (const url of tavily.urls) {
+      const { vivo, urlFinal, confirmado } = await checarSiteDoLead(url, lead);
+      if (vivo && confirmado) {
+        return {
+          siteStatus: SiteStatus.tem_site_ativo,
+          siteUrl: urlFinal,
+          siteConfidence: 0.9,
+          tavilyCheckedAt: tavily.checkedAt,
+        };
+      }
     }
   }
 
@@ -294,6 +470,10 @@ export async function enriquecerSite(lead: LeadParaEnriquecer): Promise<Enrichme
         siteConfidence: 0.95,
         googlePlaceId: google.placeId,
         googleCheckedAt: google.checkedAt,
+        tavilyCheckedAt:
+          tavily.status === "candidatos" || tavily.status === "sem_candidato"
+            ? tavily.checkedAt
+            : undefined,
       };
     }
 
@@ -306,6 +486,32 @@ export async function enriquecerSite(lead: LeadParaEnriquecer): Promise<Enrichme
       siteConfidence: 0.98,
       googlePlaceId: google.placeId,
       googleCheckedAt: google.checkedAt,
+      tavilyCheckedAt:
+        tavily.status === "candidatos" || tavily.status === "sem_candidato"
+          ? tavily.checkedAt
+          : undefined,
+    };
+  }
+
+  if (tavily.status === "sem_candidato") {
+    return {
+      siteStatus: SiteStatus.sem_site_alta_confianca,
+      siteUrl: urlDeclarada,
+      siteConfidence: 0.82,
+      tavilyCheckedAt: tavily.checkedAt,
+      googleCheckedAt:
+        google.status === "sem_correspondencia" ? google.checkedAt : undefined,
+    };
+  }
+
+  if (tavily.status === "candidatos") {
+    return {
+      siteStatus: SiteStatus.checar_manualmente,
+      siteUrl: urlDeclarada,
+      siteConfidence: 0.45,
+      tavilyCheckedAt: tavily.checkedAt,
+      googleCheckedAt:
+        google.status === "sem_correspondencia" ? google.checkedAt : undefined,
     };
   }
 
@@ -318,7 +524,7 @@ export async function enriquecerSite(lead: LeadParaEnriquecer): Promise<Enrichme
     };
   }
 
-  // Sem Google configurado, com limite esgotado ou em falha transitória, a
+  // Sem verificador configurado, com limite esgotado ou em falha transitória, a
   // ausência de um domínio adivinhável não prova que a empresa não possui site.
   return {
     siteStatus: SiteStatus.checar_manualmente,
