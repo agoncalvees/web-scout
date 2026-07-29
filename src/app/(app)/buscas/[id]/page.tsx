@@ -10,6 +10,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { categoriaPorValorOsm, labelCategoria } from "@/lib/categorias";
+import { obterResumoGooglePlaces } from "@/lib/enrichment/google-places";
 import { contarPendentes } from "@/lib/enrichment/lote";
 import { SITE_STATUS_CLASSE, SITE_STATUS_LABEL } from "@/lib/labels";
 import { PORTE_LABEL, TIER_LABEL } from "@/lib/pricing";
@@ -27,18 +28,24 @@ export const dynamic = "force-dynamic";
 
 export default async function BuscaPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ mostrar?: string }>;
 }) {
   const { id } = await params;
-  const busca = await prisma.search.findUnique({
-    where: { id },
-    include: {
-      leads: {
-        include: { enrichment: true },
+  const { mostrar } = await searchParams;
+  const [busca, googlePlaces] = await Promise.all([
+    prisma.search.findUnique({
+      where: { id },
+      include: {
+        leads: {
+          include: { enrichment: true },
+        },
       },
-    },
-  });
+    }),
+    obterResumoGooglePlaces(),
+  ]);
 
   if (!busca) notFound();
 
@@ -52,11 +59,14 @@ export default async function BuscaPage({
   const comContato = leads.filter(
     (lead) => lead.phone || lead.email || lead.instagram,
   ).length;
-  const oportunidades = leads.filter(
+  const melhores = leads.filter(
     (lead) =>
-      lead.enrichment?.siteStatus === "sem_site_alta_confianca" ||
-      lead.enrichment?.siteStatus === "site_fora_do_ar",
-  ).length;
+      (lead.enrichment?.siteStatus === "sem_site_alta_confianca" ||
+        lead.enrichment?.siteStatus === "site_fora_do_ar") &&
+      (lead.enrichment?.opportunityScore ?? 0) >= 40,
+  );
+  const mostrarTodos = mostrar === "todos";
+  const leadsExibidos = mostrarTodos ? leads : melhores;
 
   return (
     <div className="flex flex-col gap-6">
@@ -78,20 +88,32 @@ export default async function BuscaPage({
         <ExportLinks filtros={{ busca: busca.id }} />
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
           <p className="text-2xl font-semibold">{leads.length}</p>
           <p className="text-sm text-neutral-500">empresas encontradas</p>
         </div>
         <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
           <p className="text-2xl font-semibold text-emerald-700">
-            {oportunidades}
+            {melhores.length}
           </p>
-          <p className="text-sm text-neutral-500">sem site ou com site fora</p>
+          <p className="text-sm text-neutral-500">oportunidades confirmadas</p>
         </div>
         <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
           <p className="text-2xl font-semibold">{comContato}</p>
           <p className="text-sm text-neutral-500">com algum canal de contato</p>
+        </div>
+        <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+          <p className="text-2xl font-semibold">
+            {googlePlaces.configurado
+              ? `${googlePlaces.usados}/${googlePlaces.limite}`
+              : "Inativo"}
+          </p>
+          <p className="text-sm text-neutral-500">
+            {googlePlaces.configurado
+              ? "verificações Google neste mês"
+              : "Google Places não configurado"}
+          </p>
         </div>
       </div>
 
@@ -108,6 +130,20 @@ export default async function BuscaPage({
             Tente uma categoria específica e use o raio inteligente sugerido.
           </p>
         </div>
+      ) : leadsExibidos.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-neutral-300 bg-white p-8 text-center">
+          <p className="font-medium">Nenhuma oportunidade confirmada ainda.</p>
+          <p className="mt-1 text-sm text-neutral-500">
+            Leads incertos e empresas com site ficam ocultos para não poluir a
+            prospecção.
+          </p>
+          <Link
+            href={`/buscas/${busca.id}?mostrar=todos`}
+            className="mt-3 inline-flex text-sm font-semibold text-emerald-700 hover:underline"
+          >
+            Mostrar todos os {leads.length} resultados
+          </Link>
+        </div>
       ) : (
         <section>
           <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
@@ -118,16 +154,30 @@ export default async function BuscaPage({
                 segmento. Ele não garante intenção de compra.
               </p>
             </div>
-            <Link
-              href={`/kanban?busca=${encodeURIComponent(busca.id)}`}
-              className="text-sm font-semibold text-emerald-700 hover:underline"
-            >
-              Abrir no Kanban →
-            </Link>
+            <div className="flex flex-wrap gap-3 text-sm font-semibold">
+              <Link
+                href={
+                  mostrarTodos
+                    ? `/buscas/${busca.id}`
+                    : `/buscas/${busca.id}?mostrar=todos`
+                }
+                className="text-neutral-600 hover:underline"
+              >
+                {mostrarTodos
+                  ? "Mostrar apenas confirmados"
+                  : `Mostrar todos (${leads.length})`}
+              </Link>
+              <Link
+                href={`/kanban?busca=${encodeURIComponent(busca.id)}`}
+                className="text-emerald-700 hover:underline"
+              >
+                Abrir no Kanban →
+              </Link>
+            </div>
           </div>
 
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {leads.map((lead) => {
+            {leadsExibidos.map((lead) => {
               const status = lead.enrichment?.siteStatus;
               const score = lead.enrichment?.opportunityScore;
               const prioridade =

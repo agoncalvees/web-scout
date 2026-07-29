@@ -56,7 +56,19 @@ function montarWhere(request: NextRequest): Prisma.LeadWhereInput {
     ...(contato === "whatsapp" ? { phone: { not: null } } : {}),
     ...(contato === "instagram" ? { instagram: { not: null } } : {}),
     ...(contato === "email" ? { email: { not: null } } : {}),
-    ...(site || tier || prioridade ? { enrichment } : {}),
+    ...(site || tier || prioridade
+      ? { enrichment }
+      : {
+          enrichment: {
+            siteStatus: {
+              in: [
+                SiteStatus.sem_site_alta_confianca,
+                SiteStatus.site_fora_do_ar,
+              ],
+            },
+            opportunityScore: { gte: 40 },
+          },
+        }),
   };
 }
 

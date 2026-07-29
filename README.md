@@ -53,6 +53,8 @@ npm run db:push           # o Postgres emulado não suporta `migrate`, use push
 | `APP_PASSWORD` | Senha única de acesso. |
 | `AUTH_SECRET` | Segredo que assina o cookie de sessão. |
 | `OSM_USER_AGENT` | Identificação enviada ao Nominatim/Overpass. A política do OSM exige um UA com forma de contato. |
+| `GOOGLE_PLACES_API_KEY` | Opcional. Confirma empresas no Places API (New); fica somente no servidor. |
+| `GOOGLE_PLACES_MONTHLY_LIMIT` | Teto interno de Place Details. Máximo aceito pelo app: 900/mês. |
 
 ## Como o pipeline funciona
 
@@ -83,22 +85,30 @@ Para cada lead:
 
 - **tem `website` no OSM e não é rede social** → checa se responde (HEAD, com
   fallback para GET porque muito servidor pequeno devolve 405 a HEAD)
+- **tem e-mail corporativo** → testa o domínio do e-mail antes de consumir API
 - **sem `website`, ou só rede social** (Instagram, Facebook, Linktree…) → chuta
   domínios a partir do nome (`.com.br`, `.com`) e checa cada um
+- **ainda incerto e Google configurado** → usa Text Search somente por ID, busca
+  um Place Details e valida nome/distância/telefone antes de confiar no resultado
 
 Resultado em `siteStatus`:
 
 | Status | Significado |
 |---|---|
-| `sem_site_alta_confianca` | **O lead que interessa.** Nenhum site próprio encontrado. |
+| `sem_site_alta_confianca` | **O lead que interessa.** O Places encontrou a empresa e não informou site próprio. |
 | `site_fora_do_ar` | Tem domínio, mas não responde. Bom gancho de venda. |
 | `tem_site_ativo` | Já tem site. Descartar. |
-| `checar_manualmente` | A heurística não decidiu. |
+| `checar_manualmente` | A verificação não foi conclusiva; score limitado a 39. |
 
 O chute de domínio é ordenado por **precisão decrescente**, e um acerto num nome
 de palavra única cai em `checar_manualmente` em vez de `tem_site_ativo`. O motivo:
 um acerto encerra a busca e tira o lead da lista, então um falso positivo custa
 um lead bom — "Pesqueiro" acha `pesqueiro.com.br`, que é de outra empresa.
+
+O app não persiste nome, endereço, telefone ou avaliações retornados pelo
+Google. O conteúdo é usado transitoriamente para o match; somente o `place_id`
+(permitido pela política do Places) e o resultado da checagem HTTP do site são
+mantidos. Um contador no Postgres limita Place Details a no máximo 900 por mês.
 
 ### 3. Match de CNPJ (`src/lib/enrichment/cnpj.ts`)
 
@@ -198,6 +208,7 @@ arquivos `.env` reais continuam ignorados pelo Git.
 | Overpass | fair-use por IP, instável | [`overpass.ts`](src/lib/sources/overpass.ts) usa `timeout:25` e cai para o mirror `overpass.kumi.systems` |
 | IBGE Localidades | catálogo público de municípios | rota interna valida a UF, aplica timeout e cacheia a resposta por 24h |
 | BrasilAPI / minhaReceita | rate limit não documentado | [`cnpj.ts`](src/lib/enrichment/cnpj.ts) serializa as chamadas e cacheia em `CnpjCache` antes de reconsultar |
+| Google Places (opcional) | 1.000 eventos Enterprise gratuitos/mês na tabela atual | Text Search só por ID + teto interno de 900 Place Details/mês; chave restrita e server-side |
 | Vercel Hobby | 300s por função | lotes com orçamento de tempo, sem Cron |
 | Neon (serverless) | limite de conexões da conta | pool de 5 por instância em [`db.ts`](src/lib/db.ts); use a connection string do pooler |
 
@@ -206,7 +217,7 @@ arquivos `.env` reais continuam ignorados pelo Git.
 | Comando | O quê |
 |---|---|
 | `npm run dev` | servidor de desenvolvimento |
-| `npm run build` | `prisma generate` + build de produção |
+| `npm run build` | aplica migrations + `prisma generate` + build de produção |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run lint` | ESLint |
 | `npm run db:deploy` | aplica migrations (produção) |

@@ -3,7 +3,7 @@ name: prospector-lead-scoring
 description: Define e aplica o critério de qualificação de leads (Quente/Morno/Frio) do Prospector. Use ao implementar ou revisar scoring, filtros, priorização, funil comercial e novas fontes de dados.
 ---
 
-# Critério de Qualificação de Leads — Score v2
+# Critério de Qualificação de Leads — Score v3
 
 ## Contexto
 
@@ -11,7 +11,7 @@ O Prospector é um app pessoal que encontra empresas locais para oferta de sites
 feitos com IA. O score ordena oportunidades observáveis; ele não afirma que uma
 empresa certamente comprará.
 
-**Versão vigente no código:** `v2-hibrido-2026-07`.
+**Versão vigente no código:** `v3-hibrido-google-2026-07`.
 
 Os pesos são uma estimativa inicial. Devem ser recalibrados depois de 30–50
 contatos reais, comparando sinais dos leads que fecharam com os que recusaram.
@@ -20,15 +20,22 @@ contatos reais, comparando sinais dos leads que fecharam com os que recusaram.
 
 - Sem `name`: eliminar durante a coleta.
 - `tem_site_ativo`: não é oportunidade; score 0 e fica fora do Kanban padrão.
-- `sem_site_alta_confianca`: elegível.
+- `sem_site_alta_confianca`: elegível; exige confirmação confiável.
 - `site_fora_do_ar`: elegível e recebe esse motivo na explicação.
-- `checar_manualmente`: permanece elegível, com indicação de revisão.
+- `checar_manualmente`: permanece visível em filtros explícitos, mas recebe teto
+  de 39 pontos e não entra na lista principal nem no Kanban padrão.
 - `brand` ou `operator`: permanece elegível, mas nunca pode ser Quente. O score
   final fica limitado a 69 porque a decisão de compra tende a ser centralizada.
 
 O filtro usa o resultado do enrichment, não apenas a presença bruta de
 `website`. Isso preserva redes sociais colocadas no campo de site e sites
 declarados que estão fora do ar.
+
+A descoberta permanece no OpenStreetMap. O Google Places é um verificador
+opcional e só roda depois de website declarado, domínio do e-mail e candidatos
+de domínio falharem. O match exige compatibilidade de nome e distância, ou
+telefone coincidente. Dados do Places não são copiados para o lead; persiste-se
+somente o `place_id` permitido e o resultado da checagem HTTP independente.
 
 ## 2. Pontuação normalizada — máximo 100
 
@@ -54,6 +61,7 @@ confirmado por CNPJ é o proxy atual e vale no máximo 10 pontos.
 - **Morno:** score 40–69.
 - **Frio:** score < 40.
 - **Rede/franquia:** no máximo Morno, independentemente da soma bruta.
+- **Site incerto:** no máximo 39, independentemente da soma bruta.
 
 Cada enrichment persiste:
 
@@ -84,6 +92,7 @@ Depois de 30–50 contatos:
 - O total máximo dos sinais deve continuar em 100.
 - Nunca pontuar site ativo como oportunidade.
 - O teto de franquia sempre sobrepõe a soma.
+- Caso não confirmado nunca pode aparecer como Morno ou Quente.
 - Toda nova fonte precisa declarar peso, origem e tratamento de ausência.
 - Ausência de dado vale zero; não deve virar evidência negativa por si só.
 - Todo peso recalibrado deve atualizar esta skill e `src/lib/scoring.ts`.

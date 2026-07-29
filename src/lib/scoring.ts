@@ -3,7 +3,7 @@ import { isCategoriaKey, type CategoriaKey } from "@/lib/categorias";
 
 export type Prioridade = "quente" | "morno" | "frio";
 
-export const SCORE_VERSION = "v2-hibrido-2026-07";
+export const SCORE_VERSION = "v3-hibrido-google-2026-07";
 
 export interface SinaisOportunidade {
   siteStatus: SiteStatus;
@@ -57,6 +57,7 @@ export interface ScoreBreakdown {
   total: number;
   elegivel: boolean;
   limiteFranquia: boolean;
+  limiteIncerteza: boolean;
 }
 
 export interface ResultadoScore {
@@ -96,6 +97,7 @@ function pontosCapacidade(porte: Porte | null | undefined): number {
 export function pontuarOportunidade(s: SinaisOportunidade): ResultadoScore {
   const elegivel = s.siteStatus !== SiteStatus.tem_site_ativo;
   const limiteFranquia = Boolean(s.brand || s.operator);
+  const limiteIncerteza = s.siteStatus === SiteStatus.checar_manualmente;
   const categoria = isCategoriaKey(s.categoria) ? s.categoria : null;
 
   const breakdown: ScoreBreakdown = {
@@ -112,6 +114,7 @@ export function pontuarOportunidade(s: SinaisOportunidade): ResultadoScore {
     total: 0,
     elegivel,
     limiteFranquia,
+    limiteIncerteza,
   };
 
   const motivos: string[] = [];
@@ -143,6 +146,10 @@ export function pontuarOportunidade(s: SinaisOportunidade): ResultadoScore {
     breakdown.gapCompetitivo;
 
   let score = elegivel ? Math.min(100, soma) : 0;
+  if (limiteIncerteza && score >= 40) {
+    score = 39;
+    motivos.unshift("site ainda não confirmado");
+  }
   if (limiteFranquia && score >= 70) {
     score = 69;
     motivos.unshift("rede/franquia: decisão provavelmente centralizada");

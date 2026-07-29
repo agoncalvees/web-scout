@@ -84,7 +84,7 @@ export function EnrichmentRunner({
     <div className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-medium">Enriquecimento de site</p>
+          <p className="text-sm font-medium">Verificação das oportunidades</p>
           <p className="text-sm text-neutral-500">
             {pendentes === 0
               ? `${total} de ${total} leads processados.`
@@ -130,7 +130,7 @@ export function EnrichmentRunner({
 
       {rodando && (
         <p className="mt-2 text-xs text-neutral-500">
-          Processando em lotes… pode deixar a aba aberta.
+          Conferindo sites e recalculando prioridades… mantenha a aba aberta.
         </p>
       )}
       {erro && (

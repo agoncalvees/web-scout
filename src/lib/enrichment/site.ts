@@ -1,5 +1,18 @@
 import { SiteStatus } from "@/generated/prisma/enums";
 import { fetchWithTimeout } from "@/lib/http";
+import {
+  googlePlacesConfigurado,
+  verificarNoGooglePlaces,
+} from "./google-places";
+
+const SITE_CHECK_VERSION_LOCAL = "v3-local-2026-07";
+const SITE_CHECK_VERSION_GOOGLE = "v3-google-places-2026-07";
+
+export function versaoVerificacaoSiteAtual(): string {
+  return googlePlacesConfigurado()
+    ? SITE_CHECK_VERSION_GOOGLE
+    : SITE_CHECK_VERSION_LOCAL;
+}
 
 /**
  * Domínios que indicam presença em rede social, não site próprio — que é
@@ -47,6 +60,29 @@ function normalizarUrl(url: string): string | null {
   const host = extrairHost(url);
   if (!host) return null;
   return /^https?:\/\//i.test(url) ? url : `https://${url}`;
+}
+
+const EMAILS_GRATUITOS = new Set([
+  "bol.com.br",
+  "gmail.com",
+  "hotmail.com",
+  "icloud.com",
+  "live.com",
+  "outlook.com",
+  "proton.me",
+  "protonmail.com",
+  "terra.com.br",
+  "uol.com.br",
+  "yahoo.com",
+  "yahoo.com.br",
+]);
+
+function sitePeloEmail(email: string | null): string | null {
+  const dominio = email?.trim().toLowerCase().split("@")[1];
+  if (!dominio || EMAILS_GRATUITOS.has(dominio) || !dominio.includes(".")) {
+    return null;
+  }
+  return normalizarUrl(dominio);
 }
 
 /** Palavras genéricas de categoria e conectivos, que poluem o slug. */
@@ -178,12 +214,20 @@ export async function checarUrl(url: string): Promise<ResultadoChecagem> {
 export interface LeadParaEnriquecer {
   name: string;
   websiteRaw: string | null;
+  address: string | null;
+  phone: string | null;
+  email: string | null;
+  cidade: string;
+  lat: number;
+  lon: number;
 }
 
 export interface EnrichmentSite {
   siteStatus: SiteStatus;
   siteUrl: string | null;
   siteConfidence: number;
+  googlePlaceId?: string | null;
+  googleCheckedAt?: Date | null;
 }
 
 /**
@@ -210,6 +254,19 @@ export async function enriquecerSite(lead: LeadParaEnriquecer): Promise<Enrichme
         };
   }
 
+  // Um e-mail corporativo revela o domínio sem depender de nenhuma API paga.
+  const urlDoEmail = sitePeloEmail(lead.email);
+  if (urlDoEmail) {
+    const { vivo, urlFinal } = await checarUrl(urlDoEmail);
+    if (vivo) {
+      return {
+        siteStatus: SiteStatus.tem_site_ativo,
+        siteUrl: urlFinal,
+        siteConfidence: 0.95,
+      };
+    }
+  }
+
   // Sem site próprio declarado (ausente ou só rede social): tenta adivinhar.
   const candidatos = candidatosDeDominio(lead.name);
 
@@ -228,18 +285,44 @@ export async function enriquecerSite(lead: LeadParaEnriquecer): Promise<Enrichme
     }
   }
 
-  if (candidatos.length === 0) {
-    // Nome curto ou só genérico: a heurística não produziu nada testável.
+  const google = await verificarNoGooglePlaces(lead);
+  if (google.status === "correspondencia") {
+    if (!google.websiteUri || ehRedeSocial(google.websiteUri)) {
+      return {
+        siteStatus: SiteStatus.sem_site_alta_confianca,
+        siteUrl: urlDeclarada,
+        siteConfidence: 0.95,
+        googlePlaceId: google.placeId,
+        googleCheckedAt: google.checkedAt,
+      };
+    }
+
+    const { vivo, urlFinal } = await checarUrl(google.websiteUri);
     return {
-      siteStatus: SiteStatus.checar_manualmente,
-      siteUrl: urlDeclarada,
-      siteConfidence: 0.2,
+      siteStatus: vivo
+        ? SiteStatus.tem_site_ativo
+        : SiteStatus.site_fora_do_ar,
+      siteUrl: vivo ? urlFinal : google.websiteUri,
+      siteConfidence: 0.98,
+      googlePlaceId: google.placeId,
+      googleCheckedAt: google.checkedAt,
     };
   }
 
+  if (google.status === "sem_correspondencia") {
+    return {
+      siteStatus: SiteStatus.checar_manualmente,
+      siteUrl: urlDeclarada,
+      siteConfidence: candidatos.length === 0 ? 0.15 : 0.3,
+      googleCheckedAt: google.checkedAt,
+    };
+  }
+
+  // Sem Google configurado, com limite esgotado ou em falha transitória, a
+  // ausência de um domínio adivinhável não prova que a empresa não possui site.
   return {
-    siteStatus: SiteStatus.sem_site_alta_confianca,
+    siteStatus: SiteStatus.checar_manualmente,
     siteUrl: urlDeclarada,
-    siteConfidence: urlDeclarada ? 0.85 : 0.75,
+    siteConfidence: urlDeclarada ? 0.45 : 0.2,
   };
 }

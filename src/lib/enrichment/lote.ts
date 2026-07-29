@@ -5,7 +5,10 @@ import { mapComLimite } from "@/lib/pool";
 import { calcularTier } from "@/lib/pricing";
 import { pontuarOportunidade, SCORE_VERSION } from "@/lib/scoring";
 import { resolverCnpj } from "./cnpj";
-import { enriquecerSite } from "./site";
+import {
+  enriquecerSite,
+  versaoVerificacaoSiteAtual,
+} from "./site";
 
 /** Leads por chamada. ~30 cabe no orçamento de tempo com folga. */
 export const TAMANHO_LOTE = 30;
@@ -32,32 +35,41 @@ export interface LoteResultado {
   cnpjResolvidos: number;
 }
 
-/** Requer chamadas externas de site/CNPJ. */
-const PENDENTE_ENRICHMENT = {
-  OR: [
-    { enrichment: null },
-    { enrichment: { siteCheckedAt: null } },
-  ],
-};
+/** Requer chamadas externas de site; muda quando a integração Google é ativada. */
+function pendenteEnrichment() {
+  const versao = versaoVerificacaoSiteAtual();
+  return {
+    OR: [
+      { enrichment: null },
+      { enrichment: { siteCheckedAt: null } },
+      { enrichment: { siteCheckVersion: null } },
+      { enrichment: { siteCheckVersion: { not: versao } } },
+    ],
+  };
+}
 
 /** Requer enrichment externo ou apenas recálculo local do score. */
-const PENDENTE = {
-  OR: [
-    ...PENDENTE_ENRICHMENT.OR,
-    { enrichment: { scoreVersion: null } },
-    { enrichment: { scoreVersion: { not: SCORE_VERSION } } },
-  ],
-};
+function pendente() {
+  return {
+    OR: [
+      ...pendenteEnrichment().OR,
+      { enrichment: { scoreVersion: null } },
+      { enrichment: { scoreVersion: { not: SCORE_VERSION } } },
+    ],
+  };
+}
 
 /** Conta quantos leads da busca ainda não passaram pelo enrichment. */
 export function contarPendentes(searchId: string): Promise<number> {
-  return prisma.lead.count({ where: { searchId, ...PENDENTE } });
+  return prisma.lead.count({ where: { searchId, ...pendente() } });
 }
 
 interface ResultadoLead {
   siteStatus: SiteStatus;
   siteUrl: string | null;
   siteConfidence: number;
+  googlePlaceId?: string | null;
+  googleCheckedAt?: Date | null;
   cnpj: string | null;
   /** `sem_cnpj` se não achamos CNPJ; `null` se achamos mas a Receita não informa o porte. */
   porte: Porte | null;
@@ -199,12 +211,13 @@ export async function processarLote(searchId: string): Promise<LoteResultado> {
   // que não entreguem um valor reconhecido.
   const busca = await prisma.search.findUnique({
     where: { id: searchId },
-    select: { categoria: true },
+    select: { categoria: true, cidade: true },
   });
   if (!busca) throw new Error(`Busca ${searchId} não encontrada.`);
 
+  const filtroEnrichment = pendenteEnrichment();
   const pendentes = await prisma.lead.findMany({
-    where: { searchId, ...PENDENTE_ENRICHMENT },
+    where: { searchId, ...filtroEnrichment },
     select: {
       id: true,
       name: true,
@@ -219,6 +232,15 @@ export async function processarLote(searchId: string): Promise<LoteResultado> {
       openingHours: true,
       brand: true,
       operator: true,
+      lat: true,
+      lon: true,
+      enrichment: {
+        select: {
+          cnpj: true,
+          porte: true,
+          cnpjCheckedAt: true,
+        },
+      },
     },
     orderBy: { createdAt: "asc" },
     take: TAMANHO_LOTE,
@@ -260,7 +282,10 @@ export async function processarLote(searchId: string): Promise<LoteResultado> {
     CONCORRENCIA,
     prazoEm,
     async (lead) => {
-      const site = await enriquecerSite(lead).catch(() => ({
+      const site = await enriquecerSite({
+        ...lead,
+        cidade: busca.cidade,
+      }).catch(() => ({
         // Uma falha inesperada não pode travar o lote; o lead fica pra revisão
         // manual em vez de voltar pra fila e falhar de novo indefinidamente.
         siteStatus: SiteStatus.checar_manualmente,
@@ -269,9 +294,17 @@ export async function processarLote(searchId: string): Promise<LoteResultado> {
       }));
 
       // A tag de CNPJ existe em ~1% dos POIs; quando falta, nem chamamos a API.
-      const cnpj = lead.cnpjRaw
-        ? await resolverCnpj(lead.cnpjRaw).catch(() => null)
+      const cnpjAnterior = lead.enrichment?.cnpjCheckedAt
+        ? {
+            cnpj: lead.enrichment.cnpj,
+            porte: lead.enrichment.porte,
+          }
         : null;
+      const cnpj =
+        cnpjAnterior ??
+        (lead.cnpjRaw
+          ? await resolverCnpj(lead.cnpjRaw).catch(() => null)
+          : null);
 
       return {
         ...site,
@@ -282,6 +315,7 @@ export async function processarLote(searchId: string): Promise<LoteResultado> {
   );
 
   const agora = new Date();
+  const siteCheckVersion = versaoVerificacaoSiteAtual();
   let cnpjResolvidos = 0;
 
   await prisma.$transaction(
@@ -294,6 +328,13 @@ export async function processarLote(searchId: string): Promise<LoteResultado> {
         siteUrl: r.siteUrl,
         siteConfidence: r.siteConfidence,
         siteCheckedAt: agora,
+        siteCheckVersion,
+        ...(r.googlePlaceId !== undefined
+          ? { googlePlaceId: r.googlePlaceId }
+          : {}),
+        ...(r.googleCheckedAt !== undefined
+          ? { googleCheckedAt: r.googleCheckedAt }
+          : {}),
         cnpj: r.cnpj,
         porte: r.porte,
         cnpjCheckedAt: agora,
@@ -334,7 +375,7 @@ export async function processarLote(searchId: string): Promise<LoteResultado> {
   );
 
   const enriquecimentosRestantes = await prisma.lead.count({
-    where: { searchId, ...PENDENTE_ENRICHMENT },
+    where: { searchId, ...pendenteEnrichment() },
   });
   let restantes: number;
   if (enriquecimentosRestantes === 0 && resultados.size > 0) {

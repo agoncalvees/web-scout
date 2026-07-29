@@ -97,6 +97,12 @@ model Enrichment {
   siteConfidence Float?
   /// Momento da última checagem de site; null = ainda não processado.
   siteCheckedAt  DateTime?
+  /// Versão do pipeline que checou a presença digital.
+  siteCheckVersion String?
+  /// Identificador do Google Places. Pode ser persistido segundo a política da API.
+  googlePlaceId   String?
+  /// Momento em que o Places confirmou o estabelecimento.
+  googleCheckedAt DateTime?
 
   cnpj           String?
   porte          Porte?
@@ -120,6 +126,16 @@ model Enrichment {
   @@index([siteStatus])
   @@index([opportunityScore])
   @@index([siteCheckedAt])
+}
+
+/// Contador interno para manter integrações pagas abaixo da franquia configurada.
+model ExternalApiUsage {
+  provider  String
+  period    String
+  count     Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@id([provider, period])
 }
 
 /// Cache de consultas de CNPJ, compartilhado entre leads (BrasilAPI tem rate limit).

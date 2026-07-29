@@ -70,19 +70,20 @@ function montarWhere(f: Filtros): Prisma.LeadWhereInput {
     ...(f.contato === "whatsapp" ? { phone: { not: null } } : {}),
     ...(f.contato === "instagram" ? { instagram: { not: null } } : {}),
     ...(f.contato === "email" ? { email: { not: null } } : {}),
-    // Por padrão o funil mostra oportunidades e pendentes, não empresas cujo
-    // site ativo já foi confirmado. O filtro explícito de site pode exibi-las.
+    // Por padrão o funil mostra somente oportunidades confirmadas. Pendentes,
+    // sites ativos e casos manuais continuam acessíveis por filtro explícito.
     ...(precisaEnrichment
       ? { enrichment }
       : {
-          OR: [
-            { enrichment: null },
-            {
-              enrichment: {
-                siteStatus: { not: SiteStatus.tem_site_ativo },
-              },
+          enrichment: {
+            siteStatus: {
+              in: [
+                SiteStatus.sem_site_alta_confianca,
+                SiteStatus.site_fora_do_ar,
+              ],
             },
-          ],
+            opportunityScore: { gte: 40 },
+          },
         }),
   };
 }
