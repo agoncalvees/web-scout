@@ -11,6 +11,10 @@ import { prisma } from "@/lib/db";
 import { ESTAGIO_LABEL } from "@/lib/kanban";
 import { SITE_STATUS_LABEL } from "@/lib/labels";
 import { PORTE_LABEL, TIER_LABEL } from "@/lib/pricing";
+import {
+  PRIORIDADE_LABEL,
+  prioridadePorScore,
+} from "@/lib/scoring";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -38,10 +42,20 @@ function montarWhere(request: NextRequest): Prisma.LeadWhereInput {
   const enrichment: Prisma.EnrichmentWhereInput = {};
   if (site) enrichment.siteStatus = site;
   if (tier) enrichment.pricingTier = tier;
+  const prioridade = request.nextUrl.searchParams.get("prioridade");
+  if (prioridade === "quente") enrichment.opportunityScore = { gte: 70 };
+  if (prioridade === "morno") {
+    enrichment.opportunityScore = { gte: 48, lt: 70 };
+  }
+  if (prioridade === "frio") enrichment.opportunityScore = { lt: 48 };
+  const contato = request.nextUrl.searchParams.get("contato");
 
   return {
     ...(searchId ? { searchId } : {}),
-    ...(site || tier ? { enrichment } : {}),
+    ...(contato === "whatsapp" ? { phone: { not: null } } : {}),
+    ...(contato === "instagram" ? { instagram: { not: null } } : {}),
+    ...(contato === "email" ? { email: { not: null } } : {}),
+    ...(site || tier || prioridade ? { enrichment } : {}),
   };
 }
 
@@ -73,6 +87,10 @@ export async function GET(request: NextRequest) {
       category: true,
       address: true,
       phone: true,
+      email: true,
+      instagram: true,
+      facebook: true,
+      openingHours: true,
       websiteRaw: true,
       search: { select: { categoria: true } },
       enrichment: {
@@ -82,6 +100,7 @@ export async function GET(request: NextRequest) {
           cnpj: true,
           porte: true,
           pricingTier: true,
+          opportunityScore: true,
         },
       },
       kanbanStatus: { select: { stage: true } },
@@ -99,6 +118,15 @@ export async function GET(request: NextRequest) {
       Categoria: labelCategoria(categoria),
       Endereço: celulaSegura(lead.address ?? ""),
       Telefone: celulaSegura(lead.phone ?? ""),
+      Email: celulaSegura(lead.email ?? ""),
+      Instagram: celulaSegura(lead.instagram ?? ""),
+      Facebook: celulaSegura(lead.facebook ?? ""),
+      "Horário": celulaSegura(lead.openingHours ?? ""),
+      Prioridade:
+        typeof enrichment?.opportunityScore === "number"
+          ? PRIORIDADE_LABEL[prioridadePorScore(enrichment.opportunityScore)]
+          : "",
+      Score: enrichment?.opportunityScore ?? "",
       "Status do site": enrichment?.siteStatus
         ? SITE_STATUS_LABEL[enrichment.siteStatus]
         : "Na fila",
@@ -122,6 +150,12 @@ export async function GET(request: NextRequest) {
       "Categoria",
       "Endereço",
       "Telefone",
+      "Email",
+      "Instagram",
+      "Facebook",
+      "Horário",
+      "Prioridade",
+      "Score",
       "Status do site",
       "URL do site",
       "CNPJ",
@@ -135,6 +169,12 @@ export async function GET(request: NextRequest) {
     { wch: 24 },
     { wch: 42 },
     { wch: 17 },
+    { wch: 28 },
+    { wch: 34 },
+    { wch: 34 },
+    { wch: 28 },
+    { wch: 14 },
+    { wch: 10 },
     { wch: 24 },
     { wch: 36 },
     { wch: 18 },

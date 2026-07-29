@@ -2,6 +2,7 @@ import {
   CATEGORIAS,
   CATEGORIA_TODAS,
   TODAS_AS_TAGS,
+  parseTag,
 } from "@/lib/categorias";
 import { geocodificarCidade } from "./nominatim";
 import { executarQuery, montarQuery, type OverpassElement } from "./overpass";
@@ -9,6 +10,8 @@ import type { BuscaParams, BuscaResultado, LeadCru, LeadSource } from "./types";
 
 /** Monta o endereço a partir das tags `addr:*` do OSM, que vêm fragmentadas. */
 function montarEndereco(tags: Record<string, string>): string | null {
+  if (tags["addr:full"]?.trim()) return tags["addr:full"].trim();
+
   const rua = tags["addr:street"];
   const numero = tags["addr:housenumber"];
   const bairro = tags["addr:suburb"] ?? tags["addr:neighbourhood"];
@@ -54,6 +57,24 @@ function extrairCnpj(tags: Record<string, string>): string | null {
   return null;
 }
 
+function primeiroValor(...valores: Array<string | undefined>): string | null {
+  for (const valor of valores) {
+    const limpo = valor?.split(/[;,]/)[0]?.trim();
+    if (limpo) return limpo;
+  }
+  return null;
+}
+
+function normalizarRedeSocial(
+  bruto: string | null,
+  dominio: "instagram.com" | "facebook.com",
+): string | null {
+  if (!bruto) return null;
+  if (/^https?:\/\//i.test(bruto)) return bruto;
+  const usuario = bruto.replace(/^@/, "").replace(/^\/+|\/+$/g, "");
+  return usuario ? `https://${dominio}/${usuario}` : null;
+}
+
 function extrairLead(el: OverpassElement): LeadCru | null {
   const tags = el.tags;
   const name = tags?.name?.trim();
@@ -63,6 +84,15 @@ function extrairLead(el: OverpassElement): LeadCru | null {
   const lat = el.lat ?? el.center?.lat;
   const lon = el.lon ?? el.center?.lon;
   if (lat === undefined || lon === undefined) return null;
+  const websiteRaw = primeiroValor(tags.website, tags["contact:website"]);
+  const instagramDeclarado = primeiroValor(
+    tags["contact:instagram"],
+    tags.instagram,
+  );
+  const facebookDeclarado = primeiroValor(
+    tags["contact:facebook"],
+    tags.facebook,
+  );
 
   return {
     osmId: `${el.type}/${el.id}`,
@@ -75,10 +105,27 @@ function extrairLead(el: OverpassElement): LeadCru | null {
       tags.leisure ??
       "",
     address: montarEndereco(tags),
-    phone: normalizarTelefone(tags.phone ?? tags["contact:phone"] ?? tags["contact:mobile"]),
+    phone: normalizarTelefone(
+      tags["contact:whatsapp"] ??
+        tags.phone ??
+        tags["contact:phone"] ??
+        tags["contact:mobile"],
+    ),
+    email: primeiroValor(tags.email, tags["contact:email"]),
+    instagram: normalizarRedeSocial(
+      instagramDeclarado ??
+        (websiteRaw?.includes("instagram.com") ? websiteRaw : null),
+      "instagram.com",
+    ),
+    facebook: normalizarRedeSocial(
+      facebookDeclarado ??
+        (websiteRaw?.includes("facebook.com") ? websiteRaw : null),
+      "facebook.com",
+    ),
+    openingHours: primeiroValor(tags.opening_hours),
     lat,
     lon,
-    websiteRaw: tags.website ?? tags["contact:website"] ?? null,
+    websiteRaw,
     cnpjRaw: extrairCnpj(tags),
   };
 }
@@ -94,8 +141,50 @@ export const osmLeadSource: LeadSource = {
         ? TODAS_AS_TAGS
         : CATEGORIAS[categoria].tags;
 
-    const query = montarQuery(tags, centro.lat, centro.lon, raioKm * 1000);
-    const elementos = await executarQuery(query);
+    let elementos: OverpassElement[];
+
+    if (categoria === CATEGORIA_TODAS) {
+      // Uma busca regional por todos os segmentos é dividida por chave OSM.
+      // Isso evita uma consulta monolítica que os mirrors encerram com 504.
+      const grupos = new Map<string, string[]>();
+      for (const tag of tags) {
+        const [chave] = parseTag(tag);
+        const grupo = grupos.get(chave) ?? [];
+        grupo.push(tag);
+        grupos.set(chave, grupo);
+      }
+
+      const queries = Array.from(grupos.values(), (grupo) =>
+        montarQuery(grupo, centro.lat, centro.lon, raioKm * 1000),
+      );
+      const resultados: OverpassElement[][] = [];
+      const erros: unknown[] = [];
+      let proxima = 0;
+
+      async function worker() {
+        for (;;) {
+          const indice = proxima++;
+          const query = queries[indice];
+          if (!query) return;
+          try {
+            resultados[indice] = await executarQuery(query);
+          } catch (erro) {
+            erros.push(erro);
+            resultados[indice] = [];
+          }
+        }
+      }
+
+      await Promise.all([worker(), worker()]);
+      elementos = resultados.flat();
+
+      if (elementos.length === 0 && erros.length > 0) {
+        throw erros[0];
+      }
+    } else {
+      const query = montarQuery(tags, centro.lat, centro.lon, raioKm * 1000);
+      elementos = await executarQuery(query);
+    }
 
     // Uma way e um node podem descrever o mesmo estabelecimento; dedup por osmId
     // não pega isso, mas nome + coordenada arredondada pega os casos óbvios.
@@ -113,6 +202,19 @@ export const osmLeadSource: LeadSource = {
       leads.push(lead);
     }
 
-    return { centro, leads };
+    // Em áreas regionais podem existir milhares de POIs. Para prospecção
+    // individual, priorizamos os 800 com melhor chance de contato antes do
+    // enrichment detalhado, em vez de criar uma fila impraticável.
+    leads.sort((a, b) => {
+      const qualidade = (lead: LeadCru) =>
+        (lead.phone ? 5 : 0) +
+        (lead.email ? 4 : 0) +
+        (lead.instagram || lead.facebook ? 4 : 0) +
+        (lead.address ? 2 : 0) +
+        (!lead.websiteRaw ? 2 : 0);
+      return qualidade(b) - qualidade(a);
+    });
+
+    return { centro, leads: leads.slice(0, 800) };
   },
 };

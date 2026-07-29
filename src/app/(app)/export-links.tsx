@@ -5,6 +5,8 @@ export function ExportLinks({
     busca?: string;
     site?: string;
     tier?: string;
+    prioridade?: string;
+    contato?: string;
   };
 }) {
   function href(formato: "csv" | "xlsx") {
@@ -12,6 +14,8 @@ export function ExportLinks({
     if (filtros?.busca) params.set("busca", filtros.busca);
     if (filtros?.site) params.set("site", filtros.site);
     if (filtros?.tier) params.set("tier", filtros.tier);
+    if (filtros?.prioridade) params.set("prioridade", filtros.prioridade);
+    if (filtros?.contato) params.set("contato", filtros.contato);
     params.set("formato", formato);
     return `/api/export?${params.toString()}`;
   }

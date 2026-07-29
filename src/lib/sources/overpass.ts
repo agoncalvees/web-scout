@@ -7,13 +7,14 @@ import { LeadSourceError } from "./types";
  * com alguma frequência; o kumi.systems é o mirror de fallback.
  */
 const ENDPOINTS = [
+  "https://overpass.private.coffee/api/interpreter",
   "https://overpass-api.de/api/interpreter",
-  "https://overpass.kumi.systems/api/interpreter",
+  "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 ] as const;
 
-/** `timeout:25` no QL, alinhado ao timeout de rede com folga pro overhead. */
-const QL_TIMEOUT_S = 25;
-const FETCH_TIMEOUT_MS = 40_000;
+/** A consulta otimizada costuma responder antes; a folga cobre raios regionais. */
+const QL_TIMEOUT_S = 45;
+const FETCH_TIMEOUT_MS = 45_000;
 
 export interface OverpassElement {
   type: "node" | "way" | "relation";
@@ -35,14 +36,27 @@ export function montarQuery(
   lon: number,
   raioMetros: number,
 ): string {
-  const clausulas = tags
-    .map((tag) => {
-      const [chave, valor] = parseTag(tag);
-      return `  nwr["${chave}"="${valor}"](around:${raioMetros},${lat},${lon});`;
-    })
+  const porChave = new Map<string, string[]>();
+  for (const tag of tags) {
+    const [chave, valor] = parseTag(tag);
+    const valores = porChave.get(chave) ?? [];
+    valores.push(valor);
+    porChave.set(chave, valores);
+  }
+
+  const escaparRegex = (valor: string) =>
+    valor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  const clausulas = Array.from(porChave, ([chave, valores]) => {
+    if (valores.length === 1) {
+      return `  nwr["${chave}"="${valores[0]}"](around:${raioMetros},${lat},${lon});`;
+    }
+    const regex = valores.map(escaparRegex).join("|");
+    return `  nwr["${chave}"~"^(${regex})$"](around:${raioMetros},${lat},${lon});`;
+  })
     .join("\n");
 
-  return `[out:json][timeout:${QL_TIMEOUT_S}];\n(\n${clausulas}\n);\nout center tags;`;
+  return `[out:json][timeout:${QL_TIMEOUT_S}];\n(\n${clausulas}\n);\nout center tags qt;`;
 }
 
 /** Executa a query, tentando cada endpoint até um responder. */

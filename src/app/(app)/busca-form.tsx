@@ -1,6 +1,6 @@
 "use client";
 
-import { LoaderCircle, Search } from "lucide-react";
+import { LoaderCircle, Search, Sparkles } from "lucide-react";
 import { useRef, useState } from "react";
 import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
@@ -17,12 +17,18 @@ import {
   CATEGORIAS,
   CATEGORIA_KEYS,
   CATEGORIA_TODAS,
+  raioRecomendado,
+  type CategoriaBusca,
 } from "@/lib/categorias";
 import {
   ESTADOS_BRASIL,
   type Municipio,
 } from "@/lib/localidades";
-import { RAIO_MAX_KM, RAIO_MIN_KM } from "@/lib/limites";
+import {
+  RAIO_MAX_KM,
+  RAIO_MAX_TODAS_KM,
+  RAIO_MIN_KM,
+} from "@/lib/limites";
 import { buscar, type BuscaState } from "./actions";
 
 interface MunicipiosResponse {
@@ -37,6 +43,9 @@ export function BuscaForm() {
   );
   const [estado, setEstado] = useState("");
   const [cidade, setCidade] = useState("");
+  const [categoria, setCategoria] =
+    useState<CategoriaBusca>(CATEGORIA_TODAS);
+  const [raioKm, setRaioKm] = useState(raioRecomendado(CATEGORIA_TODAS));
   const [municipios, setMunicipios] = useState<Municipio[]>([]);
   const [carregandoMunicipios, setCarregandoMunicipios] = useState(false);
   const [erroMunicipios, setErroMunicipios] = useState("");
@@ -85,7 +94,12 @@ export function BuscaForm() {
           <Label htmlFor="categoria">Categoria</Label>
           <Select
             name="categoria"
-            defaultValue={CATEGORIA_TODAS}
+            value={categoria}
+            onValueChange={(value) => {
+              const proxima = value as CategoriaBusca;
+              setCategoria(proxima);
+              setRaioKm(raioRecomendado(proxima));
+            }}
             required
           >
             <SelectTrigger id="categoria" className="h-10 w-full bg-background">
@@ -185,16 +199,34 @@ export function BuscaForm() {
             id="raioKm"
             name="raioKm"
             type="number"
-            defaultValue={10}
+            value={raioKm}
+            onChange={(event) => setRaioKm(Number(event.target.value))}
             min={RAIO_MIN_KM}
-            max={RAIO_MAX_KM}
+            max={
+              categoria === CATEGORIA_TODAS
+                ? RAIO_MAX_TODAS_KM
+                : RAIO_MAX_KM
+            }
             required
             className="h-10 bg-background"
           />
           <p className="text-xs text-muted-foreground">
-            De {RAIO_MIN_KM} a {RAIO_MAX_KM} km.
+            De {RAIO_MIN_KM} a{" "}
+            {categoria === CATEGORIA_TODAS
+              ? RAIO_MAX_TODAS_KM
+              : RAIO_MAX_KM}{" "}
+            km.
           </p>
         </div>
+      </div>
+
+      <div className="flex items-start gap-2 rounded-lg bg-emerald-50 px-3 py-2.5 text-sm text-emerald-900 ring-1 ring-emerald-200">
+        <Sparkles className="mt-0.5 size-4 shrink-0" aria-hidden />
+        <p>
+          <strong>Escolha inteligente:</strong> {raioRecomendado(categoria)} km
+          é o raio recomendado para este segmento. Acima de 20 km há mais
+          volume, mas também mais duplicidade e contatos incompletos.
+        </p>
       </div>
 
       {state.erro && (

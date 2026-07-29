@@ -7,6 +7,7 @@
  */
 
 export const RAIO_MIN_KM = 1;
+export const RAIO_MAX_TODAS_KM = 12;
 
 /**
  * Raio máximo. Acima disso a query Overpass tende a estourar o `timeout:25` em

@@ -7,7 +7,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-muted/35">
       <header className="border-b border-border/80 bg-background/95">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-5 sm:px-6">
+        <div className="mx-auto flex h-16 max-w-[1480px] items-center justify-between gap-4 px-5 sm:px-6">
           <div className="flex items-center gap-3 sm:gap-6">
             <Link
               href="/"
@@ -39,7 +39,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-5 py-8 sm:px-6 sm:py-10">
+      <main className="mx-auto max-w-[1480px] px-5 py-8 sm:px-6 sm:py-10">
         {children}
       </main>
     </div>

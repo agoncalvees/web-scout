@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 interface LoteResposta {
   processados: number;
@@ -29,6 +29,7 @@ export function EnrichmentRunner({
   const [pendentes, setPendentes] = useState(pendentesIniciais);
   const [erro, setErro] = useState<string | null>(null);
   const cancelar = useRef(false);
+  const iniciouAutomaticamente = useRef(false);
 
   const concluidos = total - pendentes;
   const pct = total === 0 ? 100 : Math.round((concluidos / total) * 100);
@@ -70,6 +71,12 @@ export function EnrichmentRunner({
       router.refresh();
     }
   }, [searchId, router]);
+
+  useEffect(() => {
+    if (pendentesIniciais <= 0 || iniciouAutomaticamente.current) return;
+    iniciouAutomaticamente.current = true;
+    void rodar();
+  }, [pendentesIniciais, rodar]);
 
   if (total === 0) return null;
 

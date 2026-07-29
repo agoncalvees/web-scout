@@ -1,7 +1,9 @@
 import { PricingTier, SiteStatus } from "@/generated/prisma/enums";
+import Link from "next/link";
 import { labelCategoria } from "@/lib/categorias";
 import { SITE_STATUS_LABEL } from "@/lib/labels";
 import { TIER_LABEL } from "@/lib/pricing";
+import { PRIORIDADE_LABEL, type Prioridade } from "@/lib/scoring";
 import type { Filtros } from "./dados";
 
 export interface OpcaoBusca {
@@ -10,10 +12,6 @@ export interface OpcaoBusca {
   cidade: string;
 }
 
-/**
- * Filtros via GET, sem JS: o form navega para `/kanban?...` e a página
- * re-renderiza no servidor.
- */
 export function FiltrosKanban({
   buscas,
   atual,
@@ -22,52 +20,120 @@ export function FiltrosKanban({
   atual: Filtros;
 }) {
   const classe =
-    "rounded-md border border-neutral-300 bg-transparent px-2.5 py-1.5 text-sm dark:border-neutral-700";
+    "h-9 rounded-lg border border-neutral-300 bg-white px-3 text-sm text-neutral-900";
+  const ativos = Object.values(atual).filter(Boolean).length;
 
   return (
-    <form className="flex flex-wrap items-end gap-3">
-      <label className="flex flex-col gap-1">
-        <span className="text-xs font-medium text-neutral-500">Busca</span>
-        <select name="busca" defaultValue={atual.searchId ?? ""} className={classe}>
-          <option value="">Todas</option>
-          {buscas.map((b) => (
-            <option key={b.id} value={b.id}>
-              {labelCategoria(b.categoria)} · {b.cidade}
-            </option>
-          ))}
-        </select>
-      </label>
+    <form className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold">Filtrar oportunidades</p>
+          <p className="text-xs text-neutral-500">
+            {ativos === 0
+              ? "Nenhum filtro ativo."
+              : `${ativos} ${ativos === 1 ? "filtro ativo" : "filtros ativos"}.`}
+          </p>
+        </div>
+        {ativos > 0 && (
+          <Link
+            href="/kanban"
+            className="text-xs font-medium text-emerald-700 hover:underline"
+          >
+            Limpar filtros
+          </Link>
+        )}
+      </div>
 
-      <label className="flex flex-col gap-1">
-        <span className="text-xs font-medium text-neutral-500">Site</span>
-        <select name="site" defaultValue={atual.site ?? ""} className={classe}>
-          <option value="">Qualquer</option>
-          {Object.values(SiteStatus).map((s) => (
-            <option key={s} value={s}>
-              {SITE_STATUS_LABEL[s]}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-medium text-neutral-500">Busca</span>
+          <select
+            name="busca"
+            defaultValue={atual.searchId ?? ""}
+            className={`${classe} max-w-72`}
+          >
+            <option value="">Todas as buscas</option>
+            {buscas.map((busca) => (
+              <option key={busca.id} value={busca.id}>
+                {labelCategoria(busca.categoria)} · {busca.cidade}
+              </option>
+            ))}
+          </select>
+        </label>
 
-      <label className="flex flex-col gap-1">
-        <span className="text-xs font-medium text-neutral-500">Preço</span>
-        <select name="tier" defaultValue={atual.tier ?? ""} className={classe}>
-          <option value="">Qualquer</option>
-          {Object.values(PricingTier).map((t) => (
-            <option key={t} value={t}>
-              {TIER_LABEL[t]}
-            </option>
-          ))}
-        </select>
-      </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-medium text-neutral-500">
+            Status do site
+          </span>
+          <select
+            name="site"
+            defaultValue={atual.site ?? ""}
+            className={classe}
+          >
+            <option value="">Qualquer status</option>
+            {Object.values(SiteStatus).map((status) => (
+              <option key={status} value={status}>
+                {SITE_STATUS_LABEL[status]}
+              </option>
+            ))}
+          </select>
+        </label>
 
-      <button
-        type="submit"
-        className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-white dark:text-neutral-900"
-      >
-        Filtrar
-      </button>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-medium text-neutral-500">
+            Faixa sugerida
+          </span>
+          <select
+            name="tier"
+            defaultValue={atual.tier ?? ""}
+            className={classe}
+          >
+            <option value="">Qualquer faixa</option>
+            {Object.values(PricingTier).map((tier) => (
+              <option key={tier} value={tier}>
+                {TIER_LABEL[tier]}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-medium text-neutral-500">Prioridade</span>
+          <select
+            name="prioridade"
+            defaultValue={atual.prioridade ?? ""}
+            className={classe}
+          >
+            <option value="">Todas</option>
+            {(["quente", "morno", "frio"] as Prioridade[]).map((prioridade) => (
+              <option key={prioridade} value={prioridade}>
+                {PRIORIDADE_LABEL[prioridade]}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-medium text-neutral-500">Tem contato</span>
+          <select
+            name="contato"
+            defaultValue={atual.contato ?? ""}
+            className={classe}
+          >
+            <option value="">Qualquer canal</option>
+            <option value="whatsapp">Telefone/WhatsApp</option>
+            <option value="instagram">Instagram</option>
+            <option value="email">E-mail</option>
+          </select>
+        </label>
+
+        <button
+          type="submit"
+          className="h-9 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700"
+        >
+          Aplicar filtros
+        </button>
+      </div>
     </form>
   );
 }

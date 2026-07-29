@@ -33,10 +33,14 @@ model Lead {
   category    String
   address     String?
   phone       String?
+  email       String?
+  instagram   String?
+  facebook    String?
+  openingHours String?
   lat         Float
   lon         Float
   /// Identificador OSM no formato "<tipo>/<id>", ex: "node/123456".
-  osmId       String  @unique
+  osmId       String
   /// Valor bruto da tag website/contact:website do OSM, sem tratamento.
   websiteRaw  String?
   /// Valor bruto da tag de CNPJ do OSM (`ref:vatin` e variantes), ex "BR12345678000199".
@@ -50,6 +54,7 @@ model Lead {
   kanbanStatus KanbanStatus?
 
   @@index([searchId])
+  @@unique([searchId, osmId])
 }
 
 enum SiteStatus {
@@ -96,12 +101,17 @@ model Enrichment {
   cnpjCheckedAt  DateTime?
 
   pricingTier PricingTier?
+  /// 0..100 — prioridade comercial calculada por sinais observáveis.
+  opportunityScore Int?
+  /// Motivos legíveis que explicam a pontuação.
+  opportunityReasons Json?
 
   updatedAt DateTime @updatedAt
 
   lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
   @@index([siteStatus])
+  @@index([opportunityScore])
   @@index([siteCheckedAt])
 }
 

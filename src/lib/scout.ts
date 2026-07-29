@@ -1,9 +1,14 @@
 import { prisma } from "@/lib/db";
 import {
+  CATEGORIA_TODAS,
   isCategoriaBusca,
   type CategoriaBusca,
 } from "@/lib/categorias";
-import { RAIO_MAX_KM, RAIO_MIN_KM } from "@/lib/limites";
+import {
+  RAIO_MAX_KM,
+  RAIO_MAX_TODAS_KM,
+  RAIO_MIN_KM,
+} from "@/lib/limites";
 import { osmLeadSource } from "@/lib/sources/osm";
 import { LeadSourceError, type LeadSource } from "@/lib/sources/types";
 
@@ -34,6 +39,14 @@ export function validarParams(input: {
     input.raioKm > RAIO_MAX_KM
   ) {
     throw new LeadSourceError(`O raio deve estar entre ${RAIO_MIN_KM} e ${RAIO_MAX_KM} km.`);
+  }
+  if (
+    input.categoria === CATEGORIA_TODAS &&
+    input.raioKm > RAIO_MAX_TODAS_KM
+  ) {
+    throw new LeadSourceError(
+      `Para buscar todos os segmentos, use até ${RAIO_MAX_TODAS_KM} km. Em raios maiores, escolha uma categoria: a busca fica mais rápida e os leads são mais relevantes.`,
+    );
   }
 
   return { categoria: input.categoria, cidade, raioKm: input.raioKm };

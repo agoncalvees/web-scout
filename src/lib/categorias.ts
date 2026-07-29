@@ -97,6 +97,31 @@ export function labelCategoria(key: string): string {
   return isCategoriaKey(key) ? CATEGORIAS[key].label : key;
 }
 
+/** Raio que equilibra cobertura e tempo de resposta por densidade do segmento. */
+export function raioRecomendado(categoria: CategoriaBusca): number {
+  if (categoria === CATEGORIA_TODAS) return 8;
+
+  const densos: CategoriaKey[] = [
+    "restaurante",
+    "salao_de_beleza",
+    "farmacia",
+    "padaria",
+    "oficina_mecanica",
+  ];
+  const esparsos: CategoriaKey[] = [
+    "advocacia",
+    "contabilidade",
+    "fisioterapia",
+    "imobiliaria",
+    "psicologia",
+    "veterinaria",
+  ];
+
+  if (densos.includes(categoria)) return 8;
+  if (esparsos.includes(categoria)) return 15;
+  return 10;
+}
+
 /**
  * Converte o valor cru salvo em `Lead.category` (ex.: `dentist`) para a chave
  * da categoria. Algumas fontes podem não fornecer um valor reconhecido; nesse

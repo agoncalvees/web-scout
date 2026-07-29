@@ -1,6 +1,7 @@
 import { KanbanStage, PricingTier, SiteStatus } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { ESTAGIOS } from "@/lib/kanban";
+import type { Prioridade } from "@/lib/scoring";
 import type { Prisma } from "@/generated/prisma/client";
 
 /** Máximo de cards renderizados por coluna. */
@@ -19,8 +20,21 @@ const SELECAO = {
   category: true,
   address: true,
   phone: true,
+  email: true,
+  instagram: true,
+  facebook: true,
+  openingHours: true,
+  lat: true,
+  lon: true,
   search: { select: { categoria: true } },
-  enrichment: { select: { siteStatus: true, pricingTier: true } },
+  enrichment: {
+    select: {
+      siteStatus: true,
+      pricingTier: true,
+      opportunityScore: true,
+      opportunityReasons: true,
+    },
+  },
   kanbanStatus: { select: { stage: true } },
 } satisfies Prisma.LeadSelect;
 
@@ -30,17 +44,27 @@ export interface Filtros {
   searchId?: string;
   site?: SiteStatus;
   tier?: PricingTier;
+  prioridade?: Prioridade;
+  contato?: "whatsapp" | "instagram" | "email";
 }
 
 function montarWhere(f: Filtros): Prisma.LeadWhereInput {
   const enrichment: Prisma.EnrichmentWhereInput = {};
   if (f.site) enrichment.siteStatus = f.site;
   if (f.tier) enrichment.pricingTier = f.tier;
+  if (f.prioridade === "quente") enrichment.opportunityScore = { gte: 70 };
+  if (f.prioridade === "morno") {
+    enrichment.opportunityScore = { gte: 48, lt: 70 };
+  }
+  if (f.prioridade === "frio") enrichment.opportunityScore = { lt: 48 };
 
   return {
     ...(f.searchId ? { searchId: f.searchId } : {}),
+    ...(f.contato === "whatsapp" ? { phone: { not: null } } : {}),
+    ...(f.contato === "instagram" ? { instagram: { not: null } } : {}),
+    ...(f.contato === "email" ? { email: { not: null } } : {}),
     // Um objeto vazio aqui viraria "tem enrichment", excluindo leads na fila.
-    ...(f.site || f.tier ? { enrichment } : {}),
+    ...(f.site || f.tier || f.prioridade ? { enrichment } : {}),
   };
 }
 
@@ -91,6 +115,13 @@ export async function carregarColunas(f: Filtros): Promise<Coluna[]> {
   const agrupados = new Map<KanbanStage, LeadDoKanban[]>(
     ESTAGIOS.map((s) => [s, []]),
   );
+  leads.sort(
+    (a, b) =>
+      (b.enrichment?.opportunityScore ?? -1) -
+        (a.enrichment?.opportunityScore ?? -1) ||
+      a.name.localeCompare(b.name, "pt-BR"),
+  );
+
   for (const lead of leads) {
     agrupados.get(lead.kanbanStatus?.stage ?? KanbanStage.novo)!.push(lead);
   }

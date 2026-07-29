@@ -8,6 +8,10 @@ export interface LeadCru {
   category: string;
   address: string | null;
   phone: string | null;
+  email: string | null;
+  instagram: string | null;
+  facebook: string | null;
+  openingHours: string | null;
   lat: number;
   lon: number;
   /** Site como veio da fonte, sem tratamento (pode ser rede social). */

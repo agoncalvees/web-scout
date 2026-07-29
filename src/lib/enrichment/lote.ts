@@ -3,6 +3,7 @@ import { categoriaPorValorOsm } from "@/lib/categorias";
 import { prisma } from "@/lib/db";
 import { mapComLimite } from "@/lib/pool";
 import { calcularTier } from "@/lib/pricing";
+import { pontuarOportunidade } from "@/lib/scoring";
 import { resolverCnpj } from "./cnpj";
 import { enriquecerSite } from "./site";
 
@@ -33,7 +34,11 @@ export interface LoteResultado {
 
 /** Filtro de leads que ainda não passaram pelo enrichment. */
 const PENDENTE = {
-  OR: [{ enrichment: null }, { enrichment: { siteCheckedAt: null } }],
+  OR: [
+    { enrichment: null },
+    { enrichment: { siteCheckedAt: null } },
+    { enrichment: { opportunityScore: null } },
+  ],
 };
 
 /** Conta quantos leads da busca ainda não passaram pelo enrichment. */
@@ -76,6 +81,11 @@ export async function processarLote(searchId: string): Promise<LoteResultado> {
       category: true,
       websiteRaw: true,
       cnpjRaw: true,
+      phone: true,
+      email: true,
+      instagram: true,
+      facebook: true,
+      address: true,
     },
     orderBy: { createdAt: "asc" },
     take: TAMANHO_LOTE,
@@ -134,6 +144,23 @@ export async function processarLote(searchId: string): Promise<LoteResultado> {
           r.porte,
           categoriaPorValorOsm(lead.category) ?? busca.categoria,
         ),
+        ...(() => {
+          const oportunidade = pontuarOportunidade({
+            siteStatus: r.siteStatus,
+            telefone: lead.phone,
+            email: lead.email,
+            instagram: lead.instagram,
+            facebook: lead.facebook,
+            endereco: lead.address,
+            categoria:
+              categoriaPorValorOsm(lead.category) ?? busca.categoria,
+            porte: r.porte,
+          });
+          return {
+            opportunityScore: oportunidade.score,
+            opportunityReasons: oportunidade.motivos,
+          };
+        })(),
       };
 
       return prisma.enrichment.upsert({
