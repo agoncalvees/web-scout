@@ -1,0 +1,138 @@
+// Prospector de Empresas sem Site — schema
+// Prisma 7: a URL de conexão fica em prisma.config.ts, nunca aqui.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Uma execução do Scout: categoria + cidade + raio.
+model Search {
+  id        String   @id @default(cuid())
+  categoria String
+  cidade    String
+  lat       Float
+  lon       Float
+  raioKm    Int
+  createdAt DateTime @default(now())
+
+  leads Lead[]
+
+  @@index([createdAt])
+}
+
+/// Lead cru vindo do OpenStreetMap (via Overpass), antes de qualquer enrichment.
+model Lead {
+  id          String  @id @default(cuid())
+  searchId    String
+  name        String
+  category    String
+  address     String?
+  phone       String?
+  lat         Float
+  lon         Float
+  /// Identificador OSM no formato "<tipo>/<id>", ex: "node/123456".
+  osmId       String  @unique
+  /// Valor bruto da tag website/contact:website do OSM, sem tratamento.
+  websiteRaw  String?
+  /// Valor bruto da tag de CNPJ do OSM (`ref:vatin` e variantes), ex "BR12345678000199".
+  /// Presente em ~1% dos POIs; é a única origem automática de CNPJ que temos.
+  cnpjRaw     String?
+
+  createdAt DateTime @default(now())
+
+  search       Search        @relation(fields: [searchId], references: [id], onDelete: Cascade)
+  enrichment   Enrichment?
+  kanbanStatus KanbanStatus?
+
+  @@index([searchId])
+}
+
+enum SiteStatus {
+  sem_site_alta_confianca
+  site_fora_do_ar
+  tem_site_ativo
+  checar_manualmente
+}
+
+enum Porte {
+  MEI
+  ME
+  EPP
+  /// Porte "DEMAIS" da Receita: acima de EPP. Não é MEI/ME/EPP.
+  DEMAIS
+  /// Nenhum CNPJ encontrado — comum em profissional liberal que atua por CPF.
+  sem_cnpj
+}
+
+enum PricingTier {
+  /// Sem CNPJ ou MEI
+  T450_650
+  /// ME
+  T650_1200
+  /// EPP
+  T1200_MAIS
+}
+
+/// Resultado do enrichment (site + CNPJ) de um lead. 1:1 com Lead.
+model Enrichment {
+  leadId String @id
+
+  siteStatus     SiteStatus?
+  /// URL efetivamente checada (a do OSM ou a adivinhada pela heurística).
+  siteUrl        String?
+  /// 0..1 — confiança de que siteUrl pertence mesmo a este lead.
+  siteConfidence Float?
+  /// Momento da última checagem de site; null = ainda não processado.
+  siteCheckedAt  DateTime?
+
+  cnpj           String?
+  porte          Porte?
+  /// Momento da última consulta de CNPJ; null = ainda não processado.
+  cnpjCheckedAt  DateTime?
+
+  pricingTier PricingTier?
+
+  updatedAt DateTime @updatedAt
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([siteStatus])
+  @@index([siteCheckedAt])
+}
+
+/// Cache de consultas de CNPJ, compartilhado entre leads (BrasilAPI tem rate limit).
+model CnpjCache {
+  cnpj        String   @id
+  razaoSocial String?
+  nomeFantasia String?
+  /// `null` quando a Receita devolve porte "não informado".
+  porte       Porte?
+  municipio   String?
+  uf          String?
+  /// Payload bruto da API, pra depurar sem precisar reconsultar.
+  raw         Json
+  fetchedAt   DateTime @default(now())
+}
+
+enum KanbanStage {
+  novo
+  contatado
+  respondido
+  fechado
+  perdido
+}
+
+model KanbanStatus {
+  leadId    String      @id
+  stage     KanbanStage @default(novo)
+  updatedAt DateTime    @updatedAt
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([stage])
+}
