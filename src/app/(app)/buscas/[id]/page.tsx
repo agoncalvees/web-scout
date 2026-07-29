@@ -153,6 +153,11 @@ export default async function BuscaPage({
                       <p className="mt-0.5 text-xs text-neutral-500">
                         {labelCategoria(categoria)}
                       </p>
+                      {(lead.brand || lead.operator) && (
+                        <p className="mt-1 text-xs font-medium text-violet-700">
+                          Rede/franquia: {lead.brand ?? lead.operator}
+                        </p>
+                      )}
                     </div>
                     {prioridade && typeof score === "number" ? (
                       <span

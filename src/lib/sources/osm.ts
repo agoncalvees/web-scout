@@ -123,6 +123,8 @@ function extrairLead(el: OverpassElement): LeadCru | null {
       "facebook.com",
     ),
     openingHours: primeiroValor(tags.opening_hours),
+    brand: primeiroValor(tags.brand),
+    operator: primeiroValor(tags.operator),
     lat,
     lon,
     websiteRaw,

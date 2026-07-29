@@ -3,7 +3,7 @@ import { categoriaPorValorOsm } from "@/lib/categorias";
 import { prisma } from "@/lib/db";
 import { mapComLimite } from "@/lib/pool";
 import { calcularTier } from "@/lib/pricing";
-import { pontuarOportunidade } from "@/lib/scoring";
+import { pontuarOportunidade, SCORE_VERSION } from "@/lib/scoring";
 import { resolverCnpj } from "./cnpj";
 import { enriquecerSite } from "./site";
 
@@ -32,12 +32,20 @@ export interface LoteResultado {
   cnpjResolvidos: number;
 }
 
-/** Filtro de leads que ainda não passaram pelo enrichment. */
-const PENDENTE = {
+/** Requer chamadas externas de site/CNPJ. */
+const PENDENTE_ENRICHMENT = {
   OR: [
     { enrichment: null },
     { enrichment: { siteCheckedAt: null } },
-    { enrichment: { opportunityScore: null } },
+  ],
+};
+
+/** Requer enrichment externo ou apenas recálculo local do score. */
+const PENDENTE = {
+  OR: [
+    ...PENDENTE_ENRICHMENT.OR,
+    { enrichment: { scoreVersion: null } },
+    { enrichment: { scoreVersion: { not: SCORE_VERSION } } },
   ],
 };
 
@@ -53,6 +61,128 @@ interface ResultadoLead {
   cnpj: string | null;
   /** `sem_cnpj` se não achamos CNPJ; `null` se achamos mas a Receita não informa o porte. */
   porte: Porte | null;
+}
+
+interface LeadParaScore {
+  id: string;
+  category: string;
+  phone: string | null;
+  email: string | null;
+  instagram: string | null;
+  facebook: string | null;
+  address: string | null;
+  openingHours: string | null;
+  brand: string | null;
+  operator: string | null;
+  lat: number;
+  lon: number;
+  enrichment: {
+    siteStatus: SiteStatus | null;
+    porte: Porte | null;
+  } | null;
+}
+
+function distanciaKm(
+  a: Pick<LeadParaScore, "lat" | "lon">,
+  b: Pick<LeadParaScore, "lat" | "lon">,
+): number {
+  const rad = (graus: number) => (graus * Math.PI) / 180;
+  const dLat = rad(b.lat - a.lat);
+  const dLon = rad(b.lon - a.lon);
+  const lat1 = rad(a.lat);
+  const lat2 = rad(b.lat);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  const hSeguro = Math.max(0, Math.min(1, h));
+  return 6371 * 2 * Math.atan2(Math.sqrt(hSeguro), Math.sqrt(1 - hSeguro));
+}
+
+function categoriaEfetiva(category: string, categoriaBusca: string): string {
+  return categoriaPorValorOsm(category) ?? categoriaBusca;
+}
+
+function calcularGapCompetitivo(
+  lead: LeadParaScore,
+  universo: readonly LeadParaScore[],
+  categoriaBusca: string,
+): number | null {
+  const categoria = categoriaEfetiva(lead.category, categoriaBusca);
+  const vizinhos = universo.filter(
+    (outro) =>
+      outro.id !== lead.id &&
+      outro.enrichment?.siteStatus != null &&
+      categoriaEfetiva(outro.category, categoriaBusca) === categoria &&
+      distanciaKm(lead, outro) <= 1,
+  );
+
+  // Amostras muito pequenas geram um percentual enganoso.
+  if (vizinhos.length < 3) return null;
+  const comSite = vizinhos.filter(
+    (outro) => outro.enrichment?.siteStatus === SiteStatus.tem_site_ativo,
+  ).length;
+  return comSite / vizinhos.length;
+}
+
+async function recalcularScoresDaBusca(
+  searchId: string,
+  categoriaBusca: string,
+): Promise<void> {
+  const leads: LeadParaScore[] = await prisma.lead.findMany({
+    where: { searchId },
+    select: {
+      id: true,
+      category: true,
+      phone: true,
+      email: true,
+      instagram: true,
+      facebook: true,
+      address: true,
+      openingHours: true,
+      brand: true,
+      operator: true,
+      lat: true,
+      lon: true,
+      enrichment: { select: { siteStatus: true, porte: true } },
+    },
+  });
+
+  const atualizacoes = leads.flatMap((lead) => {
+    const siteStatus = lead.enrichment?.siteStatus;
+    if (!siteStatus) return [];
+
+    const oportunidade = pontuarOportunidade({
+      siteStatus,
+      telefone: lead.phone,
+      email: lead.email,
+      instagram: lead.instagram,
+      facebook: lead.facebook,
+      endereco: lead.address,
+      horario: lead.openingHours,
+      categoria: categoriaEfetiva(lead.category, categoriaBusca),
+      porte: lead.enrichment?.porte,
+      brand: lead.brand,
+      operator: lead.operator,
+      gapCompetitivo: calcularGapCompetitivo(lead, leads, categoriaBusca),
+    });
+
+    return [
+      prisma.enrichment.update({
+        where: { leadId: lead.id },
+        data: {
+          opportunityScore: oportunidade.score,
+          opportunityReasons: oportunidade.motivos,
+          opportunityBreakdown: oportunidade.breakdown,
+          scoreVersion: SCORE_VERSION,
+        },
+      }),
+    ];
+  });
+
+  // Evita uma transação com centenas de statements em buscas regionais.
+  for (let i = 0; i < atualizacoes.length; i += 100) {
+    await prisma.$transaction(atualizacoes.slice(i, i + 100));
+  }
 }
 
 /**
@@ -74,7 +204,7 @@ export async function processarLote(searchId: string): Promise<LoteResultado> {
   if (!busca) throw new Error(`Busca ${searchId} não encontrada.`);
 
   const pendentes = await prisma.lead.findMany({
-    where: { searchId, ...PENDENTE },
+    where: { searchId, ...PENDENTE_ENRICHMENT },
     select: {
       id: true,
       name: true,
@@ -86,6 +216,9 @@ export async function processarLote(searchId: string): Promise<LoteResultado> {
       instagram: true,
       facebook: true,
       address: true,
+      openingHours: true,
+      brand: true,
+      operator: true,
     },
     orderBy: { createdAt: "asc" },
     take: TAMANHO_LOTE,
@@ -97,6 +230,30 @@ export async function processarLote(searchId: string): Promise<LoteResultado> {
     [SiteStatus.tem_site_ativo]: 0,
     [SiteStatus.checar_manualmente]: 0,
   };
+
+  // Uma troca de pesos não deve repetir requests de site e CNPJ. Quando os
+  // dados externos já existem, recalculamos todos os scores somente no banco.
+  if (pendentes.length === 0) {
+    const desatualizados = await contarPendentes(searchId);
+    if (desatualizados > 0) {
+      try {
+        await recalcularScoresDaBusca(searchId, busca.categoria);
+      } catch (erro) {
+        await prisma.enrichment.updateMany({
+          where: { lead: { searchId } },
+          data: { scoreVersion: null },
+        });
+        throw erro;
+      }
+    }
+
+    return {
+      processados: desatualizados,
+      restantes: await contarPendentes(searchId),
+      porStatus,
+      cnpjResolvidos: 0,
+    };
+  }
 
   const { resultados } = await mapComLimite<(typeof pendentes)[number], ResultadoLead>(
     pendentes,
@@ -152,13 +309,18 @@ export async function processarLote(searchId: string): Promise<LoteResultado> {
             instagram: lead.instagram,
             facebook: lead.facebook,
             endereco: lead.address,
+            horario: lead.openingHours,
             categoria:
               categoriaPorValorOsm(lead.category) ?? busca.categoria,
             porte: r.porte,
+            brand: lead.brand,
+            operator: lead.operator,
           });
           return {
             opportunityScore: oportunidade.score,
             opportunityReasons: oportunidade.motivos,
+            opportunityBreakdown: oportunidade.breakdown,
+            scoreVersion: SCORE_VERSION,
           };
         })(),
       };
@@ -171,9 +333,30 @@ export async function processarLote(searchId: string): Promise<LoteResultado> {
     }),
   );
 
+  const enriquecimentosRestantes = await prisma.lead.count({
+    where: { searchId, ...PENDENTE_ENRICHMENT },
+  });
+  let restantes: number;
+  if (enriquecimentosRestantes === 0 && resultados.size > 0) {
+    try {
+      await recalcularScoresDaBusca(searchId, busca.categoria);
+    } catch (erro) {
+      // Se a consolidação falhar, a versão volta a null para o próximo clique
+      // tentar novamente em vez de manter scores provisórios como definitivos.
+      await prisma.enrichment.updateMany({
+        where: { lead: { searchId } },
+        data: { scoreVersion: null },
+      });
+      throw erro;
+    }
+    restantes = await contarPendentes(searchId);
+  } else {
+    restantes = await contarPendentes(searchId);
+  }
+
   return {
     processados: resultados.size,
-    restantes: await contarPendentes(searchId),
+    restantes,
     porStatus,
     cnpjResolvidos,
   };

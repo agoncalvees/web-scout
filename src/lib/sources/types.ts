@@ -12,6 +12,8 @@ export interface LeadCru {
   instagram: string | null;
   facebook: string | null;
   openingHours: string | null;
+  brand: string | null;
+  operator: string | null;
   lat: number;
   lon: number;
   /** Site como veio da fonte, sem tratamento (pode ser rede social). */

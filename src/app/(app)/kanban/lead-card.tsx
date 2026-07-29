@@ -83,6 +83,12 @@ export function LeadCard({ lead }: { lead: LeadDoKanban }) {
         </p>
       )}
 
+      {(lead.brand || lead.operator) && (
+        <p className="mt-1 text-[11px] font-medium text-violet-700">
+          Rede/franquia: {lead.brand ?? lead.operator}
+        </p>
+      )}
+
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
         {site ? (
           <span

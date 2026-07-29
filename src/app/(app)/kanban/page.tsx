@@ -99,7 +99,7 @@ export default async function KanbanPage({
           </p>
         </div>
       ) : (
-        <div className="grid items-start gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
+        <div className="grid items-start gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
           {colunas.map((coluna) => (
             <section
               key={coluna.stage}

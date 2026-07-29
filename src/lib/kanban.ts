@@ -5,14 +5,16 @@ export const ESTAGIOS = [
   KanbanStage.novo,
   KanbanStage.contatado,
   KanbanStage.respondido,
+  KanbanStage.negociando,
   KanbanStage.fechado,
   KanbanStage.perdido,
 ] as const;
 
 export const ESTAGIO_LABEL: Record<KanbanStage, string> = {
   [KanbanStage.novo]: "Novo",
-  [KanbanStage.contatado]: "Contatado",
+  [KanbanStage.contatado]: "Contatado · sem resposta",
   [KanbanStage.respondido]: "Respondido",
+  [KanbanStage.negociando]: "Negociando",
   [KanbanStage.fechado]: "Fechado",
   [KanbanStage.perdido]: "Perdido",
 };
@@ -22,6 +24,7 @@ export const ESTAGIO_CLASSE: Record<KanbanStage, string> = {
   [KanbanStage.novo]: "bg-neutral-400",
   [KanbanStage.contatado]: "bg-sky-500",
   [KanbanStage.respondido]: "bg-amber-500",
+  [KanbanStage.negociando]: "bg-violet-500",
   [KanbanStage.fechado]: "bg-emerald-500",
   [KanbanStage.perdido]: "bg-red-400",
 };
@@ -40,6 +43,7 @@ const LINHA_PRINCIPAL = [
   KanbanStage.novo,
   KanbanStage.contatado,
   KanbanStage.respondido,
+  KanbanStage.negociando,
   KanbanStage.fechado,
 ] as const;
 

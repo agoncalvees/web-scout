@@ -24,6 +24,8 @@ const SELECAO = {
   instagram: true,
   facebook: true,
   openingHours: true,
+  brand: true,
+  operator: true,
   lat: true,
   lon: true,
   search: { select: { categoria: true } },
@@ -54,17 +56,34 @@ function montarWhere(f: Filtros): Prisma.LeadWhereInput {
   if (f.tier) enrichment.pricingTier = f.tier;
   if (f.prioridade === "quente") enrichment.opportunityScore = { gte: 70 };
   if (f.prioridade === "morno") {
-    enrichment.opportunityScore = { gte: 48, lt: 70 };
+    enrichment.opportunityScore = { gte: 40, lt: 70 };
   }
-  if (f.prioridade === "frio") enrichment.opportunityScore = { lt: 48 };
+  if (f.prioridade === "frio") enrichment.opportunityScore = { lt: 40 };
+  if (!f.site && (f.tier || f.prioridade)) {
+    enrichment.siteStatus = { not: SiteStatus.tem_site_ativo };
+  }
+
+  const precisaEnrichment = Boolean(f.site || f.tier || f.prioridade);
 
   return {
     ...(f.searchId ? { searchId: f.searchId } : {}),
     ...(f.contato === "whatsapp" ? { phone: { not: null } } : {}),
     ...(f.contato === "instagram" ? { instagram: { not: null } } : {}),
     ...(f.contato === "email" ? { email: { not: null } } : {}),
-    // Um objeto vazio aqui viraria "tem enrichment", excluindo leads na fila.
-    ...(f.site || f.tier || f.prioridade ? { enrichment } : {}),
+    // Por padrão o funil mostra oportunidades e pendentes, não empresas cujo
+    // site ativo já foi confirmado. O filtro explícito de site pode exibi-las.
+    ...(precisaEnrichment
+      ? { enrichment }
+      : {
+          OR: [
+            { enrichment: null },
+            {
+              enrichment: {
+                siteStatus: { not: SiteStatus.tem_site_ativo },
+              },
+            },
+          ],
+        }),
   };
 }
 

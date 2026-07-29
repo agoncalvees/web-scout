@@ -37,6 +37,9 @@ model Lead {
   instagram   String?
   facebook    String?
   openingHours String?
+  /// Marca/operador indicam rede ou franquia; limitam a prioridade a "Morno".
+  brand       String?
+  operator    String?
   lat         Float
   lon         Float
   /// Identificador OSM no formato "<tipo>/<id>", ex: "node/123456".
@@ -105,6 +108,10 @@ model Enrichment {
   opportunityScore Int?
   /// Motivos legíveis que explicam a pontuação.
   opportunityReasons Json?
+  /// Pontos por sinal, para auditoria e recalibração com conversões reais.
+  opportunityBreakdown Json?
+  /// Identifica qual conjunto de pesos gerou o score persistido.
+  scoreVersion String?
 
   updatedAt DateTime @updatedAt
 
@@ -133,6 +140,7 @@ enum KanbanStage {
   novo
   contatado
   respondido
+  negociando
   fechado
   perdido
 }

@@ -12,6 +12,7 @@ import { ESTAGIO_LABEL } from "@/lib/kanban";
 import { SITE_STATUS_LABEL } from "@/lib/labels";
 import { PORTE_LABEL, TIER_LABEL } from "@/lib/pricing";
 import {
+  motivosDoScore,
   PRIORIDADE_LABEL,
   prioridadePorScore,
 } from "@/lib/scoring";
@@ -45,9 +46,9 @@ function montarWhere(request: NextRequest): Prisma.LeadWhereInput {
   const prioridade = request.nextUrl.searchParams.get("prioridade");
   if (prioridade === "quente") enrichment.opportunityScore = { gte: 70 };
   if (prioridade === "morno") {
-    enrichment.opportunityScore = { gte: 48, lt: 70 };
+    enrichment.opportunityScore = { gte: 40, lt: 70 };
   }
-  if (prioridade === "frio") enrichment.opportunityScore = { lt: 48 };
+  if (prioridade === "frio") enrichment.opportunityScore = { lt: 40 };
   const contato = request.nextUrl.searchParams.get("contato");
 
   return {
@@ -91,6 +92,8 @@ export async function GET(request: NextRequest) {
       instagram: true,
       facebook: true,
       openingHours: true,
+      brand: true,
+      operator: true,
       websiteRaw: true,
       search: { select: { categoria: true } },
       enrichment: {
@@ -101,6 +104,7 @@ export async function GET(request: NextRequest) {
           porte: true,
           pricingTier: true,
           opportunityScore: true,
+          opportunityReasons: true,
         },
       },
       kanbanStatus: { select: { stage: true } },
@@ -122,11 +126,15 @@ export async function GET(request: NextRequest) {
       Instagram: celulaSegura(lead.instagram ?? ""),
       Facebook: celulaSegura(lead.facebook ?? ""),
       "Horário": celulaSegura(lead.openingHours ?? ""),
+      "Rede/franquia": celulaSegura(lead.brand ?? lead.operator ?? ""),
       Prioridade:
         typeof enrichment?.opportunityScore === "number"
           ? PRIORIDADE_LABEL[prioridadePorScore(enrichment.opportunityScore)]
           : "",
       Score: enrichment?.opportunityScore ?? "",
+      "Motivos do score": celulaSegura(
+        motivosDoScore(enrichment?.opportunityReasons).join(" · "),
+      ),
       "Status do site": enrichment?.siteStatus
         ? SITE_STATUS_LABEL[enrichment.siteStatus]
         : "Na fila",
@@ -154,8 +162,10 @@ export async function GET(request: NextRequest) {
       "Instagram",
       "Facebook",
       "Horário",
+      "Rede/franquia",
       "Prioridade",
       "Score",
+      "Motivos do score",
       "Status do site",
       "URL do site",
       "CNPJ",
@@ -173,8 +183,10 @@ export async function GET(request: NextRequest) {
     { wch: 34 },
     { wch: 34 },
     { wch: 28 },
+    { wch: 24 },
     { wch: 14 },
     { wch: 10 },
+    { wch: 54 },
     { wch: 24 },
     { wch: 36 },
     { wch: 18 },
