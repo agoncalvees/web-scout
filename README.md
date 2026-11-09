@@ -1,10 +1,4 @@
-# Prospector de Empresas sem Site
-
-App de uso pessoal para prospectar empresas locais **sem site** e gerar leads
-qualificados. Descobre estabelecimentos no OpenStreetMap por categoria e cidade,
-checa se cada um tem site próprio no ar e classifica o resultado.
-
-> Não é um SaaS: é single user, com uma senha só, rodando no plano Hobby da Vercel.
+# Prospector 
 
 ## Status
 
